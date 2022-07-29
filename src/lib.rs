@@ -3,8 +3,8 @@ use std::iter::FusedIterator;
 use std::str::{Chars, from_utf8, from_utf8_unchecked};
 
 #[derive(Copy, Clone, Debug)]
-struct StRingBuffer<const size: usize> {
-    data: [u8; size],
+struct StRingBuffer<const SIZE: usize> {
+    data: [u8; SIZE],
     head: usize,
     tail: usize,
 }
@@ -48,7 +48,7 @@ trait StringBuffer {
     }
 }
 
-impl<const size: usize> AsRef<str> for StRingBuffer<size> {
+impl<const SIZE: usize> AsRef<str> for StRingBuffer<SIZE> {
     fn as_ref(&self) -> &str {
         //TODO: how does splitting a codepoint across the ring work?
         // splitting it means we need to find the end before the split codepoint here
@@ -57,22 +57,22 @@ impl<const size: usize> AsRef<str> for StRingBuffer<size> {
         // SAFETY:
         unsafe {
             if self.tail >= self.head {
-                from_utf8_unchecked(&self.data[self.head..min(self.tail, size)])
+                from_utf8_unchecked(&self.data[self.head..min(self.tail, SIZE)])
             } else {
-                from_utf8_unchecked(&self.data[self.head..size])
+                from_utf8_unchecked(&self.data[self.head..SIZE])
             }
         }
     }
 }
 
-impl<const size: usize> StringBuffer for StRingBuffer<size> {
+impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     fn push_char(&mut self, c: char) {
         todo!()
     }
 
     fn push_str(&mut self, s: &str) {
         let bytes = s.as_bytes();
-        if self.tail + bytes.len() < size {
+        if self.tail + bytes.len() < SIZE {
             let new_tail = self.tail + bytes.len();
             self.data[self.tail..new_tail].copy_from_slice(bytes);
         }
@@ -99,10 +99,10 @@ impl<const size: usize> StringBuffer for StRingBuffer<size> {
     }
 }
 
-impl<const size: usize> StRingBuffer<size> {
+impl<const SIZE: usize> StRingBuffer<SIZE> {
     const fn new() -> Self {
         Self{
-            data: [0; size],
+            data: [0; SIZE],
             head: 0,
             tail: 0
         }
