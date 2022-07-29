@@ -162,27 +162,28 @@ mod tests {
         HeapStRingBuffer::new(SMALL_SIZE)
     }
 
+    fn verify(test: &impl StringBuffer, expected_len: usize, first: &str, second: &str) {
+        assert_eq!(test.len(), expected_len);
+        assert_eq!(test.as_slices().0, first);
+        assert_eq!(test.as_slices().1, second);
+        first.chars().chain(second.chars()).zip(test.chars()).for_each(|(expected, given)|assert_eq!(expected, given));
+    }
+
     #[test_case(&mut SMALL_CONST.clone())]
     #[test_case(&mut small_heap())]
     fn basic(test: &mut impl StringBuffer){
         test.push_char('A');
-        assert_eq!(test.len(), 1);
-        assert_eq!(test.as_slices().0, "A");
-        assert_eq!(test.as_slices().1, "");
+        verify(test, 1, "A", "");
+
         test.push_str("BCDE");
-        assert_eq!(test.len(), 5);
-        assert_eq!(test.as_slices().0, "ABCDE");
-        assert_eq!(test.as_slices().1, "");
+        verify(test, 5, "ABCDE", "");
 
         assert_eq!(SMALL_SIZE, 5);
         test.push_char('X');
-        assert_eq!(test.len(), 5);
-        assert_eq!(test.as_slices().0, "BCDE");
-        assert_eq!(test.as_slices().1, "X");
+        verify(test, 5, "BCDE", "X");
+
         test.align();
-        assert_eq!(test.len(), 5);
-        assert_eq!(test.as_slices().0, "BCDEX");
-        assert_eq!(test.as_slices().1, "");
+        verify(test, 5, "BCDEX", "");
     }
 
     #[test_case(&mut StRingBuffer::<3>::new())]
@@ -194,27 +195,11 @@ mod tests {
         assert_eq!(test.len(), 3);
         test.push_char('Ɵ'); //Latin Capital Letter O with Middle Tilde (0xC6 0x9F in UTF-8)
         //[0xC6, 0x9F, *^C]
-        assert_eq!(test.len(), 3);
-        assert_eq!(test.as_slices().0, "C");
-        assert_eq!(test.as_slices().1, "Ɵ");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('C'));
-            assert_eq!(iter.next(), Some('Ɵ'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 3, "C", "Ɵ");
 
         test.push_str("XY");
         //[Y*, _, ^X]
-        assert_eq!(test.len(), 2);
-        assert_eq!(test.as_slices().0, "X");
-        assert_eq!(test.as_slices().1, "Y");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('X'));
-            assert_eq!(iter.next(), Some('Y'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 2, "X", "Y");
 
         //split on buffer end
         test.push_char('Z');
@@ -222,57 +207,28 @@ mod tests {
         assert_eq!(test.len(), 3);
         test.push_char('Ɵ');
         //[^0xC6, 0x9F*, _]
-        assert_eq!(test.len(), 2);
-        assert_eq!(test.as_slices().0, "Ɵ");
-        assert_eq!(test.as_slices().1, "");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('Ɵ'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 2, "Ɵ", "");
 
         test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
         //[^0xC6, 0x9B*, _]
-        assert_eq!(test.len(), 2);
-        assert_eq!(test.as_slices().0, "ƛ");
-        assert_eq!(test.as_slices().1, "");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('ƛ'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 2, "ƛ", "");
 
         //three bytes
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
         //[^0xEA, 0x99, 0x8x*]
-        assert_eq!(test.len(), 1);
-        assert_eq!(test.as_slices().0, "Ꙃ");
-        assert_eq!(test.as_slices().1, "");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('Ꙃ'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 1, "Ꙃ", "");
+
         test.push_char('A');
         //[^A*, _, _]
-        assert_eq!(test.len(), 1);
-        assert_eq!(test.as_slices().0, "A");
-        assert_eq!(test.as_slices().1, "");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), Some('A'));
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 1, "A", "");
+    }
 
+    #[test_case(&mut StRingBuffer::<3>::new())]
+    #[test_case(&mut HeapStRingBuffer::new(3))]
+    fn too_big(test: &mut impl StringBuffer) {
         //four bytes (too big for buffer)
         test.push_char('🦀'); //Crab Emoji (Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
         //[^_*, _, _]
-        assert_eq!(test.len(), 0);
-        assert_eq!(test.as_slices().0, "");
-        assert_eq!(test.as_slices().1, "");
-        {
-            let mut iter = test.chars();
-            assert_eq!(iter.next(), None);
-        }
+        verify(test, 0, "", "");
     }
 }
