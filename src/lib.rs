@@ -198,10 +198,10 @@ mod tests {
         assert_eq!(test.as_slices().0, "C");
         assert_eq!(test.as_slices().1, "Ɵ");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('C'));
-            assert_eq!(test.next(), Some('Ɵ'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('C'));
+            assert_eq!(iter.next(), Some('Ɵ'));
+            assert_eq!(iter.next(), None);
         }
 
         test.push_str("XY");
@@ -210,10 +210,10 @@ mod tests {
         assert_eq!(test.as_slices().0, "X");
         assert_eq!(test.as_slices().1, "Y");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('X'));
-            assert_eq!(test.next(), Some('Y'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('X'));
+            assert_eq!(iter.next(), Some('Y'));
+            assert_eq!(iter.next(), None);
         }
 
         //split on buffer end
@@ -226,9 +226,9 @@ mod tests {
         assert_eq!(test.as_slices().0, "Ɵ");
         assert_eq!(test.as_slices().1, "");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('Ɵ'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('Ɵ'));
+            assert_eq!(iter.next(), None);
         }
 
         test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
@@ -237,9 +237,9 @@ mod tests {
         assert_eq!(test.as_slices().0, "ƛ");
         assert_eq!(test.as_slices().1, "");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('ƛ'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('ƛ'));
+            assert_eq!(iter.next(), None);
         }
 
         //three bytes
@@ -249,9 +249,9 @@ mod tests {
         assert_eq!(test.as_slices().0, "Ꙃ");
         assert_eq!(test.as_slices().1, "");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('Ꙃ'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('Ꙃ'));
+            assert_eq!(iter.next(), None);
         }
         test.push_char('A');
         //[^A*, _, _]
@@ -259,9 +259,9 @@ mod tests {
         assert_eq!(test.as_slices().0, "A");
         assert_eq!(test.as_slices().1, "");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), Some('A'));
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), Some('A'));
+            assert_eq!(iter.next(), None);
         }
 
         //four bytes (too big for buffer)
@@ -271,8 +271,8 @@ mod tests {
         assert_eq!(test.as_slices().0, "");
         assert_eq!(test.as_slices().1, "");
         {
-            let iter = test.chars();
-            assert_eq!(test.next(), None);
+            let mut iter = test.chars();
+            assert_eq!(iter.next(), None);
         }
     }
 
