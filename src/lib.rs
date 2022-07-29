@@ -152,6 +152,7 @@ impl HeapStRingBuffer {
 
 #[cfg(test)]
 mod tests {
+    use test_case::test_case;
     use crate::{HeapStRingBuffer, StRingBuffer, StringBuffer};
 
     const SMALL_SIZE: usize = 5;
@@ -161,7 +162,9 @@ mod tests {
         HeapStRingBuffer::new(SMALL_SIZE)
     }
 
-    fn basic_helper(test: &mut impl StringBuffer){
+    #[test_case(&mut SMALL_CONST.clone())]
+    #[test_case(&mut small_heap())]
+    fn basic(test: &mut impl StringBuffer){
         test.push_char('A');
         assert_eq!(test.len(), 1);
         assert_eq!(test.as_slices().0, "A");
@@ -181,13 +184,10 @@ mod tests {
         assert_eq!(test.as_slices().0, "BCDEX");
         assert_eq!(test.as_slices().1, "");
     }
-    #[test]
-    fn basic(){
-        basic_helper(&mut SMALL_CONST.clone());
-        basic_helper(&mut small_heap());
-    }
 
-    fn two_byte_helper(test: &mut impl StringBuffer) {
+    #[test_case(&mut StRingBuffer::<3>::new())]
+    #[test_case(&mut HeapStRingBuffer::new(3))]
+    fn two_byte(test: &mut impl StringBuffer) {
         assert_eq!(test.capacity(), 3);
         test.push_str("ABC");
         //[^A, B, C*]
@@ -274,12 +274,5 @@ mod tests {
             let mut iter = test.chars();
             assert_eq!(iter.next(), None);
         }
-    }
-
-    #[test]
-    fn two_byte(){
-        let mut con = StRingBuffer::<3>::new();
-        two_byte_helper(&mut con);
-        two_byte_helper(&mut HeapStRingBuffer::new(3));
     }
 }
