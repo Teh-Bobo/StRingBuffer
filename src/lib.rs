@@ -2,6 +2,54 @@ use std::cmp::{min, Ordering};
 use std::iter::FusedIterator;
 use std::str::{Chars, from_utf8, from_utf8_unchecked};
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+enum State {
+    #[default]
+    Empty,
+    Straight{count: usize},
+    Looped{first: usize, end_offset: u8, next: usize}
+}
+
+impl State {
+    unsafe fn get_char_push_slice<'a>(&'a mut self, c: char, data: &'a mut [u8]) -> &'a mut [u8] {
+        let c_len = c.len_utf8();
+        match self {
+            State::Empty => {
+                *self = State::Straight { count: c_len };
+                data
+            }
+            State::Straight { count } => {
+                if *count + c_len > data.len() {
+                    let end_offset = (data.len() - *count).try_into().unwrap();
+                    let (first, _) = from_utf8_unchecked(data).char_indices().find(|(i,_)| *i>=c_len).expect("No valid place for new head found");
+                    *self = State::Looped {
+                        first,
+                        end_offset,
+                        next: c_len,
+                    };
+                    data
+                } else {
+                    // self = &mut State::Straight { count: *count + c_len };
+                    // &mut data[*count..(*count + c_len)]
+                    *count += c_len;
+                    &mut data[(*count - c_len)..*count]
+                }
+            }
+            State::Looped { first, end_offset, next } => {
+                if *first - *next < c_len {
+                    //first needs to move
+                    todo!()
+                } else {
+                    //big enough gap between first and next
+                    let next = *next;
+                    *self = State::Looped { next: next + c_len, first: *first, end_offset: *end_offset };
+                    &mut data[next..(next + c_len)]
+                }
+            }
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct StRingBuffer<const SIZE: usize> {
     data: [u8; SIZE],
@@ -13,8 +61,7 @@ struct StRingBuffer<const SIZE: usize> {
 #[derive(Clone, Debug)]
 struct HeapStRingBuffer {
     data: Box<[u8]>,
-    head: usize,
-    tail: usize,
+    state: State,
 }
 
 trait StringBuffer {
@@ -138,19 +185,48 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 
 impl StringBuffer for HeapStRingBuffer {
     fn push_char(&mut self, c: char) {
-        todo!()
-    }
-
-    fn push_str(&mut self, s: &str) {
-        todo!()
+        let c_len = c.len_utf8();
+        let mut slice = match c_len.cmp(&self.capacity()) {
+            Ordering::Less => unsafe {
+                self.state.get_char_push_slice(c, &mut self.data)
+            }
+            Ordering::Equal => {
+                self.state = State::Straight {count: c_len};
+                &mut self.data
+            }
+            Ordering::Greater => {
+                self.clear();
+                return;
+            },
+        };
+        c.encode_utf8(slice);
     }
 
     fn as_slices(&self) -> (&str, &str) {
-        todo!()
+        unsafe {
+            match self.state {
+                State::Empty => ("", ""),
+                State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
+                State::Looped { first, end_offset, next } => {
+                    (from_utf8_unchecked(&self.data[first..(self.capacity() - end_offset as usize)]),
+                     from_utf8_unchecked(&self.data[0..next]))
+                }
+            }
+        }
     }
 
     fn align(&mut self) {
-        todo!()
+        match self.state {
+            State::Empty | State::Straight { .. } => {}
+            State::Looped { first, end_offset, next } => {
+                let copy = self.data[0..next].to_owned();
+                let len = self.len();
+                let first_len = self.capacity() - end_offset as usize - first;
+                self.data.copy_within(first..(self.capacity() - end_offset as usize), 0);
+                self.data[first_len..].copy_from_slice(&copy);
+                self.state = State::Straight {count: len};
+            }
+        }
     }
 
     fn move_head(&mut self, index: usize) -> usize {
@@ -158,7 +234,13 @@ impl StringBuffer for HeapStRingBuffer {
     }
 
     fn len(&self) -> usize {
-        todo!()
+        match self.state {
+            State::Empty => 0,
+            State::Straight { count } => count,
+            State::Looped { first, end_offset, next } => {
+                self.capacity() - end_offset as usize - (first - next)
+            }
+        }
     }
 
     fn capacity(&self) -> usize {
@@ -166,7 +248,7 @@ impl StringBuffer for HeapStRingBuffer {
     }
 
     fn clear(&mut self) {
-        todo!()
+        self.state = State::Empty;
     }
 }
 
@@ -174,8 +256,7 @@ impl HeapStRingBuffer {
     pub fn new(size: usize) -> Self {
         HeapStRingBuffer{
             data: vec![0; size].into_boxed_slice(),
-            head: 0,
-            tail: 0
+            state: Default::default(),
         }
     }
 }
