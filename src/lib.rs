@@ -1,12 +1,13 @@
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::iter::FusedIterator;
 use std::str::{Chars, from_utf8, from_utf8_unchecked};
 
 #[derive(Copy, Clone, Debug)]
 struct StRingBuffer<const SIZE: usize> {
     data: [u8; SIZE],
-    head: usize,
-    tail: usize,
+    first: usize,
+    last: usize,
+    end_offset: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -21,7 +22,9 @@ trait StringBuffer {
     fn push_char(&mut self, c: char);
 
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
-    fn push_str(&mut self, s: &str);
+    fn push_str(&mut self, s: &str){
+        s.chars().for_each(|c| self.push_char(c));
+    }
 
     /// Get a reference to the two buffer segments in order.
     ///
@@ -46,40 +49,54 @@ trait StringBuffer {
         let (front, back) = self.as_slices();
         front.chars().chain(back.chars())
     }
-}
 
-impl<const SIZE: usize> AsRef<str> for StRingBuffer<SIZE> {
-    fn as_ref(&self) -> &str {
-        //TODO: how does splitting a codepoint across the ring work?
-        // splitting it means we need to find the end before the split codepoint here
-        // not splitting means that the &str ends before the end of the buffer
-
-        // SAFETY:
-        unsafe {
-            if self.tail >= self.head {
-                from_utf8_unchecked(&self.data[self.head..min(self.tail, SIZE)])
-            } else {
-                from_utf8_unchecked(&self.data[self.head..SIZE])
-            }
-        }
-    }
+    fn clear(&mut self);
 }
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     fn push_char(&mut self, c: char) {
-        todo!()
-    }
-
-    fn push_str(&mut self, s: &str) {
-        let bytes = s.as_bytes();
-        if self.tail + bytes.len() < SIZE {
-            let new_tail = self.tail + bytes.len();
-            self.data[self.tail..new_tail].copy_from_slice(bytes);
+        let c_len = c.len_utf8();
+        match c_len.cmp(&SIZE) {
+            Ordering::Less => {
+                if self.last < self.first {
+                    if self.last + c_len > self.first {
+                        //head needs to move
+                        self.move_head(self.last + c_len);
+                    }
+                    //everything fits
+                    c.encode_utf8(&mut self.data[self.last+1..]);
+                    self.last += c_len;
+                } else {
+                    if c_len + self.last > SIZE {
+                        // loop
+                        self.end_offset = (SIZE - self.last) as u8;
+                        self.last = 0;
+                        //recurse to hit the self.tail < self.head case
+                        self.push_char(c);
+                    } else {
+                        //everything fits
+                        c.encode_utf8(&mut self.data[self.last+1..]);
+                        self.last += c_len;
+                    }
+                }
+            }
+            Ordering::Equal => {
+                self.clear();
+                c.encode_utf8(&mut self.data);
+            }
+            Ordering::Greater => self.clear(),
         }
     }
 
     fn as_slices(&self) -> (&str, &str) {
-        todo!()
+        // SAFETY: Great care is taken in the other functions to ensure the validity of the str invariants
+        unsafe {
+            if self.last >= self.first {
+               (from_utf8_unchecked(&self.data[self.first..=self.last]), "")
+            } else {
+                (from_utf8_unchecked(&self.data[self.first..(SIZE - self.end_offset as usize)]), from_utf8_unchecked(&self.data[0..=self.last]))
+            }
+        }
     }
 
     fn align(&mut self) {
@@ -91,11 +108,20 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     }
 
     fn len(&self) -> usize {
-        todo!()
+        if self.last < self.first {
+            SIZE - (self.first - self.last) - self.end_offset as usize
+        } else {
+            self.last - self.first
+        }
     }
 
     fn capacity(&self) -> usize {
         self.data.len()
+    }
+
+    fn clear(&mut self) {
+        self.first = 0;
+        self.last = 0;
     }
 }
 
@@ -103,8 +129,9 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
     const fn new() -> Self {
         Self{
             data: [0; SIZE],
-            head: 0,
-            tail: 0
+            first: 0,
+            last: 0,
+            end_offset: 0,
         }
     }
 }
@@ -136,6 +163,10 @@ impl StringBuffer for HeapStRingBuffer {
 
     fn capacity(&self) -> usize {
         self.data.len()
+    }
+
+    fn clear(&mut self) {
+        todo!()
     }
 }
 
