@@ -2,6 +2,19 @@ use std::cmp::{min, Ordering};
 use std::iter::FusedIterator;
 use std::str::{Chars, from_utf8, from_utf8_unchecked};
 
+const fn is_utf8_char_boundary(b: u8) -> bool {
+    // Stolen from core::num::mod, which keeps this function private
+    // This is bit magic equivalent to: b < 128 || b >= 192
+    (b as i8) >= -0x40
+}
+
+fn next_char_boundary(data: &[u8]) -> Option<usize> {
+    data.iter()
+        .enumerate()
+        .find(|(_, b)| is_utf8_char_boundary(**b))
+        .map(|(i, _)| i)
+}
+
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 enum State {
     #[default]
@@ -11,39 +24,49 @@ enum State {
 }
 
 impl State {
-    unsafe fn get_char_push_slice<'a>(&'a mut self, c: char, data: &'a mut [u8]) -> &'a mut [u8] {
-        let c_len = c.len_utf8();
+    fn get_char_slice<'a>(&'a mut self, char_len: usize, data: &'a mut [u8]) -> &'a mut [u8] {
         match self {
             State::Empty => {
-                *self = State::Straight { count: c_len };
+                *self = State::Straight { count: char_len };
                 data
             }
             State::Straight { count } => {
-                if *count + c_len > data.len() {
+                if *count + char_len > data.len() {
                     let end_offset = (data.len() - *count).try_into().unwrap();
-                    let (first, _) = from_utf8_unchecked(data).char_indices().find(|(i,_)| *i>=c_len).expect("No valid place for new head found");
+                    let first = next_char_boundary(&data[1..]).expect("No valid place for new head found") + 1;
                     *self = State::Looped {
                         first,
                         end_offset,
-                        next: c_len,
+                        next: char_len,
                     };
                     data
                 } else {
-                    // self = &mut State::Straight { count: *count + c_len };
-                    // &mut data[*count..(*count + c_len)]
-                    *count += c_len;
-                    &mut data[(*count - c_len)..*count]
+                    *count += char_len;
+                    &mut data[(*count - char_len)..*count]
                 }
             }
             State::Looped { first, end_offset, next } => {
-                if *first - *next < c_len {
+                if *first - *next < char_len {
                     //first needs to move
-                    todo!()
+                    let new_first = next_char_boundary(&data[*first + 1..]);
+                    match new_first {
+                        None => {
+                            //first needs to loop back to the start (back to straight)
+                            *self = State::Straight {count: *next};
+                            // head down the straight pipeline
+                            self.get_char_slice(char_len, data)
+                        }
+                        Some(nf) => {
+                            let next = *next;
+                            *self = State::Looped { next: next + char_len, first: *first, end_offset: *end_offset };
+                            &mut data[next..(next + char_len)]
+                        }
+                    }
                 } else {
                     //big enough gap between first and next
                     let next = *next;
-                    *self = State::Looped { next: next + c_len, first: *first, end_offset: *end_offset };
-                    &mut data[next..(next + c_len)]
+                    *self = State::Looped { next: next + char_len, first: *first, end_offset: *end_offset };
+                    &mut data[next..(next + char_len)]
                 }
             }
         }
@@ -185,13 +208,11 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 
 impl StringBuffer for HeapStRingBuffer {
     fn push_char(&mut self, c: char) {
-        let c_len = c.len_utf8();
-        let mut slice = match c_len.cmp(&self.capacity()) {
-            Ordering::Less => unsafe {
-                self.state.get_char_push_slice(c, &mut self.data)
-            }
+        let char_len = c.len_utf8();
+        let mut slice = match char_len.cmp(&self.capacity()) {
+            Ordering::Less => self.state.get_char_slice(char_len, &mut self.data),
             Ordering::Equal => {
-                self.state = State::Straight {count: c_len};
+                self.state = State::Straight {count: char_len };
                 &mut self.data
             }
             Ordering::Greater => {
@@ -238,7 +259,11 @@ impl StringBuffer for HeapStRingBuffer {
             State::Empty => 0,
             State::Straight { count } => count,
             State::Looped { first, end_offset, next } => {
-                self.capacity() - end_offset as usize - (first - next)
+                if next > first {
+                    self.capacity() - end_offset as usize
+                } else {
+                    self.capacity() - end_offset as usize - (first - next)
+                }
             }
         }
     }
@@ -265,6 +290,7 @@ impl HeapStRingBuffer {
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
+
     use crate::{HeapStRingBuffer, StRingBuffer, StringBuffer};
 
     const SMALL_SIZE: usize = 5;
