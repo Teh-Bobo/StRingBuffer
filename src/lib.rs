@@ -8,7 +8,7 @@ const fn is_utf8_char_boundary(b: u8) -> bool {
 }
 
 fn next_char_boundary(data: &[u8], start: usize) -> Option<usize> {
-    data[start..].iter()
+    data[start.min(data.len())..].iter()
         .enumerate()
         .find(|(_, b)| is_utf8_char_boundary(**b))
         .map(|(i, _)| i + start)
@@ -57,7 +57,7 @@ impl State {
             State::Looped { first, end_offset, next } => {
                 if *first - *next < char_len {
                     //first needs to move
-                    let new_first = next_char_boundary(data, *first + 1);
+                    let new_first = next_char_boundary(data, *first + char_len);
                     match new_first {
                         None => {
                             //first needs to loop back to the start (back to straight)
@@ -66,16 +66,22 @@ impl State {
                             self.get_char_slice(char_len, data)
                         }
                         Some(nf) => {
-                            let next = *next;
-                            *self = State::Looped { next: next + char_len, first: nf, end_offset: *end_offset };
-                            &mut data[next..(next + char_len)]
+                            let next_copy = *next;
+                            let new_next = next_copy + char_len;
+                            if new_next > data.len() - *end_offset as usize {
+                                //char insert overwrites end offset
+                                *end_offset = (data.len() - new_next).try_into().unwrap();
+                            }
+                            *next = new_next;
+                            *first = nf;
+                            &mut data[next_copy..new_next]
                         }
                     }
                 } else {
                     //big enough gap between first and next
-                    let next = *next;
-                    *self = State::Looped { next: next + char_len, first: *first, end_offset: *end_offset };
-                    &mut data[next..(next + char_len)]
+                    let next_copy = *next;
+                    *next = next_copy + char_len;
+                    &mut data[next_copy..(next_copy + char_len)]
                 }
             }
         }
