@@ -32,7 +32,7 @@ impl State {
             State::Straight { count } => {
                 if *count + char_len > data.len() {
                     let end_offset = (data.len() - *count).try_into().unwrap();
-                    let first = next_char_boundary(data, 1).expect("No valid place for new head found");
+                    let first = next_char_boundary(data, char_len).expect("No valid place for new head found");
                     *self = State::Looped {
                         first,
                         end_offset,
