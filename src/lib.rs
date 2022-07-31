@@ -387,8 +387,8 @@ mod tests {
         verify(test, 4, "ABCD","");
 
         test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
-        //[^0xC6, 0x9B*, C, D, _]
-        verify(test, 4, "ƛ","CD");
+        //[0xC6, 0x9B*, ^C, D, _]
+        verify(test, 4, "CD", "ƛ");
 
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
         //[^0xC6, 0x9B, 0xEA, 0x99, 0x82*]
