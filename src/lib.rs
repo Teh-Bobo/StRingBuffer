@@ -31,15 +31,25 @@ impl State {
             }
             State::Straight { count } => {
                 if *count + char_len > data.len() {
+                    //char doesn't fit in straight, need to loop
                     let end_offset = (data.len() - *count).try_into().unwrap();
-                    let first = next_char_boundary(data, char_len).expect("No valid place for new head found");
-                    *self = State::Looped {
-                        first,
-                        end_offset,
-                        next: char_len,
+                    let first = next_char_boundary(&data[..*count], char_len);
+                    *self = match first {
+                        //nothing found, this should only happen if the buffer
+                        //is small and adding this char overlaps the end and causes
+                        //the char to be written from the start--clearing the existing buffer
+                        None => State::Straight { count: char_len },
+                        //new first found within straight
+                        Some(first) =>
+                            State::Looped {
+                                first,
+                                end_offset,
+                                next: char_len,
+                            },
                     };
                     data
                 } else {
+                    //char fits as-is
                     *count += char_len;
                     &mut data[(*count - char_len)..*count]
                 }
