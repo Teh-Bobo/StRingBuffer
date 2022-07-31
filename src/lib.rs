@@ -7,11 +7,11 @@ const fn is_utf8_char_boundary(b: u8) -> bool {
     (b as i8) >= -0x40
 }
 
-fn next_char_boundary(data: &[u8]) -> Option<usize> {
-    data.iter()
+fn next_char_boundary(data: &[u8], start: usize) -> Option<usize> {
+    data[start..].iter()
         .enumerate()
         .find(|(_, b)| is_utf8_char_boundary(**b))
-        .map(|(i, _)| i)
+        .map(|(i, _)| i + start)
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -32,7 +32,7 @@ impl State {
             State::Straight { count } => {
                 if *count + char_len > data.len() {
                     let end_offset = (data.len() - *count).try_into().unwrap();
-                    let first = next_char_boundary(&data[1..]).expect("No valid place for new head found") + 1;
+                    let first = next_char_boundary(data, 1).expect("No valid place for new head found");
                     *self = State::Looped {
                         first,
                         end_offset,
@@ -47,7 +47,7 @@ impl State {
             State::Looped { first, end_offset, next } => {
                 if *first - *next < char_len {
                     //first needs to move
-                    let new_first = next_char_boundary(&data[*first + 1..]);
+                    let new_first = next_char_boundary(data, *first + 1);
                     match new_first {
                         None => {
                             //first needs to loop back to the start (back to straight)
@@ -290,7 +290,7 @@ impl HeapStRingBuffer {
 mod tests {
     use test_case::test_case;
 
-    use crate::{HeapStRingBuffer, StRingBuffer, StringBuffer};
+    use crate::{HeapStRingBuffer, next_char_boundary, StRingBuffer, StringBuffer};
 
     const SMALL_SIZE: usize = 5;
     const SMALL_CONST: StRingBuffer<SMALL_SIZE> = StRingBuffer::new();
@@ -367,5 +367,41 @@ mod tests {
         test.push_char('🦀'); //Crab Emoji (Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
         //[^_*, _, _]
         verify(test, 0, "", "");
+    }
+
+    #[test]
+    fn char_boundary_simple() {
+        let data = "ABCD".as_bytes();
+        assert_eq!(next_char_boundary(data, 0), Some(0));
+        assert_eq!(next_char_boundary(data, 1), Some(1));
+        assert_eq!(next_char_boundary(data, 2), Some(2));
+        assert_eq!(next_char_boundary(data, 3), Some(3));
+    }
+
+    #[test]
+    fn char_boundary_two_byte() {
+        let data = "AƟB".as_bytes();
+        assert_eq!(next_char_boundary(data,0), Some(0));
+        assert_eq!(next_char_boundary(data,1), Some(1));
+        assert_eq!(next_char_boundary(data,2), Some(3));
+        assert_eq!(next_char_boundary(data,3), Some(3));
+    }
+
+    #[test]
+    fn char_boundary_three_byte() {
+        let data = "ꙂB".as_bytes();
+        assert_eq!(next_char_boundary(data, 0), Some(0));
+        assert_eq!(next_char_boundary(data,1), Some(3));
+        assert_eq!(next_char_boundary(data,2), Some(3));
+        assert_eq!(next_char_boundary(data,3), Some(3));
+    }
+
+    #[test]
+    fn char_boundary_none() {
+        let data = "AꙂ".as_bytes();
+        assert_eq!(next_char_boundary(data, 0), Some(0));
+        assert_eq!(next_char_boundary(data,1), Some(1));
+        assert_eq!(next_char_boundary(data,2), None);
+        assert_eq!(next_char_boundary(data,3), None);
     }
 }
