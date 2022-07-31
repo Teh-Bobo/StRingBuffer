@@ -392,7 +392,7 @@ mod tests {
 
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
         //[^0xC6, 0x9B, 0xEA, 0x99, 0x82*]
-        verify(test, 5, "ƛ", "Ꙃ");
+        verify(test, 5, "ƛꙂ", "");
 
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
         //[^0xEA, 0x99, 0x82*, _, _]
