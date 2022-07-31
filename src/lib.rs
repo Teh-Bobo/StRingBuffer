@@ -1,6 +1,5 @@
-use std::cmp::{min, Ordering};
-use std::iter::FusedIterator;
-use std::str::{Chars, from_utf8, from_utf8_unchecked};
+use std::cmp::Ordering;
+use std::str::{Chars, from_utf8_unchecked};
 
 const fn is_utf8_char_boundary(b: u8) -> bool {
     // Stolen from core::num::mod, which keeps this function private
@@ -58,7 +57,7 @@ impl State {
                         }
                         Some(nf) => {
                             let next = *next;
-                            *self = State::Looped { next: next + char_len, first: *first, end_offset: *end_offset };
+                            *self = State::Looped { next: next + char_len, first: nf, end_offset: *end_offset };
                             &mut data[next..(next + char_len)]
                         }
                     }
@@ -173,7 +172,7 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
         todo!()
     }
 
-    fn move_head(&mut self, index: usize) -> usize {
+    fn move_head(&mut self, _index: usize) -> usize {
         todo!()
     }
 
@@ -196,7 +195,7 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
 }
 
 impl<const SIZE: usize> StRingBuffer<SIZE> {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self{
             data: [0; SIZE],
             first: 0,
@@ -209,7 +208,7 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 impl StringBuffer for HeapStRingBuffer {
     fn push_char(&mut self, c: char) {
         let char_len = c.len_utf8();
-        let mut slice = match char_len.cmp(&self.capacity()) {
+        let slice = match char_len.cmp(&self.capacity()) {
             Ordering::Less => self.state.get_char_slice(char_len, &mut self.data),
             Ordering::Equal => {
                 self.state = State::Straight {count: char_len };
@@ -250,7 +249,7 @@ impl StringBuffer for HeapStRingBuffer {
         }
     }
 
-    fn move_head(&mut self, index: usize) -> usize {
+    fn move_head(&mut self, _index: usize) -> usize {
         todo!()
     }
 
