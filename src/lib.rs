@@ -362,7 +362,7 @@ mod tests {
 
         //three bytes
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
-        //[^0xEA, 0x99, 0x8x*]
+        //[^0xEA, 0x99, 0x82*]
         verify(test, 3, "Ꙃ", "");
 
         test.push_char('A');
@@ -377,6 +377,26 @@ mod tests {
         test.push_char('🦀'); //Crab Emoji (Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
         //[^_*, _, _]
         verify(test, 0, "", "");
+    }
+
+    #[test_case(&mut StRingBuffer::<5>::new())]
+    #[test_case(&mut HeapStRingBuffer::new(5))]
+    fn big_edge(test: &mut impl StringBuffer) {
+        test.push_str("ABCD");
+        //[^A, B, C, D*, _]
+        verify(test, 4, "ABCD","");
+
+        test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        //[^0xC6, 0x9B*, C, D, _]
+        verify(test, 4, "ƛ","CD");
+
+        test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        //[^0xC6, 0x9B, 0xEA, 0x99, 0x82*]
+        verify(test, 5, "ƛ", "Ꙃ");
+
+        test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        //[^0xEA, 0x99, 0x82*, _, _]
+        verify(test, 3, "Ꙃ", "");
     }
 
     #[test]
