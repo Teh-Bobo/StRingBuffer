@@ -1,6 +1,147 @@
 use std::cmp::Ordering;
 use std::str::{Chars, from_utf8_unchecked};
 
+
+pub trait StringBuffer {
+    /// Adds a char to the buffer. Overwrites the start if the buffer is full.
+    fn push_char(&mut self, c: char);
+
+    /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
+    fn push_str(&mut self, s: &str){
+        s.chars().for_each(|c| self.push_char(c));
+    }
+
+    /// Get a reference to the two buffer segments in order.
+    ///
+    /// If the current data fits entirely in the buffer, and it is aligned, then the second
+    /// reference will be an empty &str.
+    fn as_slices(&self) -> (&str, &str);
+
+    /// Copies data as required to make the head the start of the buffer. Required to represent the
+    /// entire buffer as a single &str.
+    fn align(&mut self);
+
+    /// Returns the length of this buffer, in bytes, not chars or graphemes
+    fn len(&self) -> usize;
+
+    fn capacity(&self) -> usize;
+
+    fn chars(&self) -> std::iter::Chain<Chars<'_>, Chars<'_>> {
+        let (front, back) = self.as_slices();
+        front.chars().chain(back.chars())
+    }
+
+    fn clear(&mut self);
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct StRingBuffer<const SIZE: usize> {
+    data: [u8; SIZE],
+    state: State,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeapStRingBuffer {
+    data: Box<[u8]>,
+    state: State,
+}
+
+macro_rules! impl_buffer_trait {
+() => {
+        fn push_char(&mut self, c: char) {
+            let char_len = c.len_utf8();
+            let slice = match char_len.cmp(&self.capacity()) {
+                Ordering::Less => self.state.get_char_slice(char_len, &mut self.data),
+                Ordering::Equal => {
+                    self.state = State::Straight {count: char_len };
+                    &mut self.data
+                }
+                Ordering::Greater => {
+                    self.clear();
+                    return;
+                },
+            };
+            c.encode_utf8(slice);
+        }
+
+        fn as_slices(&self) -> (&str, &str) {
+            unsafe {
+                match self.state {
+                    State::Empty => ("", ""),
+                    State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
+                    State::Looped { first, end_offset, next } => {
+                        (from_utf8_unchecked(&self.data[first..(self.capacity() - end_offset as usize)]),
+                         from_utf8_unchecked(&self.data[0..next]))
+                    }
+                }
+            }
+        }
+
+        fn align(&mut self) {
+            match self.state {
+                State::Empty | State::Straight { .. } => {}
+                State::Looped { first, end_offset, next } => {
+                    let copy = self.data[0..next].to_owned();
+                    let len = self.len();
+                    let capacity_minus_offset = self.capacity() - end_offset as usize;
+                    let first_len = capacity_minus_offset - first;
+                    self.data.copy_within(first..capacity_minus_offset, 0);
+                    self.data[first_len..].copy_from_slice(&copy);
+                    self.state = State::Straight {count: len};
+                }
+            }
+        }
+
+        fn len(&self) -> usize {
+            match self.state {
+                State::Empty => 0,
+                State::Straight { count } => count,
+                State::Looped { first, end_offset, next } => {
+                    if next > first {
+                        self.capacity() - end_offset as usize
+                    } else {
+                        self.capacity() - end_offset as usize - (first - next)
+                    }
+                }
+            }
+        }
+
+        fn capacity(&self) -> usize {
+            self.data.len()
+        }
+
+        fn clear(&mut self) {
+            self.state = State::Empty;
+        }
+    }
+}
+
+impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
+    impl_buffer_trait!();
+}
+
+impl<const SIZE: usize> StRingBuffer<SIZE> {
+    pub const fn new() -> Self {
+        Self {
+            data: [0; SIZE],
+            state: State::Empty,
+        }
+    }
+}
+
+impl StringBuffer for HeapStRingBuffer {
+    impl_buffer_trait!();
+}
+
+impl HeapStRingBuffer {
+    pub fn new(size: usize) -> Self {
+        HeapStRingBuffer{
+            data: vec![0; size].into_boxed_slice(),
+            state: Default::default(),
+        }
+    }
+}
+
 const fn is_utf8_char_boundary(b: u8) -> bool {
     // Stolen from core::num::mod, which keeps this function private
     // This is bit magic equivalent to: b < 128 || b >= 192
@@ -84,145 +225,6 @@ impl State {
                     &mut data[next_copy..(next_copy + char_len)]
                 }
             }
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-struct StRingBuffer<const SIZE: usize> {
-    data: [u8; SIZE],
-    state: State,
-}
-
-#[derive(Clone, Debug)]
-struct HeapStRingBuffer {
-    data: Box<[u8]>,
-    state: State,
-}
-
-trait StringBuffer {
-    /// Adds a char to the buffer. Overwrites the start if the buffer is full.
-    fn push_char(&mut self, c: char);
-
-    /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
-    fn push_str(&mut self, s: &str){
-        s.chars().for_each(|c| self.push_char(c));
-    }
-
-    /// Get a reference to the two buffer segments in order.
-    ///
-    /// If the current data fits entirely in the buffer, and it is aligned, then the second
-    /// reference will be an empty &str.
-    fn as_slices(&self) -> (&str, &str);
-
-    /// Copies data as required to make the head the start of the buffer. Required to represent the
-    /// entire buffer as a single &str.
-    fn align(&mut self);
-
-    /// Returns the length of this buffer, in bytes, not chars or graphemes
-    fn len(&self) -> usize;
-
-    fn capacity(&self) -> usize;
-
-    fn chars(&self) -> std::iter::Chain<Chars<'_>, Chars<'_>> {
-        let (front, back) = self.as_slices();
-        front.chars().chain(back.chars())
-    }
-
-    fn clear(&mut self);
-}
-
-macro_rules! impl_buffer_trait {
-    () => {
-        fn push_char(&mut self, c: char) {
-            let char_len = c.len_utf8();
-            let slice = match char_len.cmp(&self.capacity()) {
-                Ordering::Less => self.state.get_char_slice(char_len, &mut self.data),
-                Ordering::Equal => {
-                    self.state = State::Straight {count: char_len };
-                    &mut self.data
-                }
-                Ordering::Greater => {
-                    self.clear();
-                    return;
-                },
-            };
-            c.encode_utf8(slice);
-        }
-
-        fn as_slices(&self) -> (&str, &str) {
-            unsafe {
-                match self.state {
-                    State::Empty => ("", ""),
-                    State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
-                    State::Looped { first, end_offset, next } => {
-                        (from_utf8_unchecked(&self.data[first..(self.capacity() - end_offset as usize)]),
-                         from_utf8_unchecked(&self.data[0..next]))
-                    }
-                }
-            }
-        }
-
-        fn align(&mut self) {
-            match self.state {
-                State::Empty | State::Straight { .. } => {}
-                State::Looped { first, end_offset, next } => {
-                    let copy = self.data[0..next].to_owned();
-                    let len = self.len();
-                    let capacity_minus_offset = self.capacity() - end_offset as usize;
-                    let first_len = capacity_minus_offset - first;
-                    self.data.copy_within(first..capacity_minus_offset, 0);
-                    self.data[first_len..].copy_from_slice(&copy);
-                    self.state = State::Straight {count: len};
-                }
-            }
-        }
-
-        fn len(&self) -> usize {
-            match self.state {
-                State::Empty => 0,
-                State::Straight { count } => count,
-                State::Looped { first, end_offset, next } => {
-                    if next > first {
-                        self.capacity() - end_offset as usize
-                    } else {
-                        self.capacity() - end_offset as usize - (first - next)
-                    }
-                }
-            }
-        }
-
-        fn capacity(&self) -> usize {
-            self.data.len()
-        }
-
-        fn clear(&mut self) {
-            self.state = State::Empty;
-        }
-    }
-}
-impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
-    impl_buffer_trait!();
-}
-
-impl<const SIZE: usize> StRingBuffer<SIZE> {
-    pub const fn new() -> Self {
-        Self {
-            data: [0; SIZE],
-            state: State::Empty,
-        }
-    }
-}
-
-impl StringBuffer for HeapStRingBuffer {
-    impl_buffer_trait!();
-}
-
-impl HeapStRingBuffer {
-    pub fn new(size: usize) -> Self {
-        HeapStRingBuffer{
-            data: vec![0; size].into_boxed_slice(),
-            state: Default::default(),
         }
     }
 }
