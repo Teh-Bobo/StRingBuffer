@@ -24,6 +24,8 @@ pub trait StringBuffer {
     /// Returns the length of this buffer, in bytes, not chars or graphemes
     fn len(&self) -> usize;
 
+    fn is_empty(&self) -> bool;
+
     fn capacity(&self) -> usize;
 
     fn chars(&self) -> std::iter::Chain<Chars<'_>, Chars<'_>> {
@@ -104,6 +106,10 @@ macro_rules! impl_buffer_trait {
                     }
                 }
             }
+        }
+
+        fn is_empty(&self) -> bool {
+            matches!(self.state, State::Empty)
         }
 
         fn capacity(&self) -> usize {
@@ -253,6 +259,7 @@ mod tests {
     #[test_case(&mut SMALL_CONST.clone())]
     #[test_case(&mut small_heap())]
     fn basic(test: &mut impl StringBuffer){
+        assert!(test.is_empty());
         test.push_char('A');
         verify(test, 1, "A", "");
 
@@ -270,6 +277,7 @@ mod tests {
     #[test_case(&mut StRingBuffer::<3>::new())]
     #[test_case(&mut HeapStRingBuffer::new(3))]
     fn two_byte(test: &mut impl StringBuffer) {
+        assert!(test.is_empty());
         assert_eq!(test.capacity(), 3);
         test.push_str("ABC");
         //[^A, B, C*]
@@ -307,6 +315,7 @@ mod tests {
     #[test_case(&mut StRingBuffer::<3>::new())]
     #[test_case(&mut HeapStRingBuffer::new(3))]
     fn too_big(test: &mut impl StringBuffer) {
+        assert!(test.is_empty());
         //four bytes (too big for buffer)
         test.push_char('🦀'); //Crab Emoji (Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
         //[^_*, _, _]
@@ -316,6 +325,7 @@ mod tests {
     #[test_case(&mut StRingBuffer::<5>::new())]
     #[test_case(&mut HeapStRingBuffer::new(5))]
     fn big_edge(test: &mut impl StringBuffer) {
+        assert!(test.is_empty());
         test.push_str("ABCD");
         //[^A, B, C, D*, _]
         verify(test, 4, "ABCD","");
