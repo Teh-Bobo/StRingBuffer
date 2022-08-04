@@ -1,4 +1,13 @@
 #![no_std]
+#![deny(missing_docs)]
+
+//! A ring buffer specialization for strings. The crate provides two versions of the buffer and a
+//! [`StringBuffer`](StringBuffer) trait they both implement. [`StRingBuffer`](StRingBuffer) is a
+//! stack allocated version using const generics. [`HeapStRingBuffer`](HeapStRingBuffer) is a heap
+//! allocated version.
+//!
+//! When full these buffers both operate by overwriting the current head. All operations happen
+//! in constant time except where explicitly noted.
 
 extern crate alloc;
 
@@ -9,11 +18,19 @@ use core::cmp::Ordering;
 use core::iter::Chain;
 use core::str::{Chars, from_utf8_unchecked};
 
+/// A buffer specializing in holding data for a string. Pushing data to the buffer will not fail nor
+/// panic. When full, the end of the data overwrites the start, while keeping the integrity of the
+/// underlying utf-8 data.
 pub trait StringBuffer {
     /// Adds a char to the buffer. Overwrites the start if the buffer is full.
+    ///
+    /// This will never panic nor fail. However, if the length of the char in utf-8 exceeds the
+    /// length of the buffer then the buffer will be emptied.
     fn push_char(&mut self, c: char);
 
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
+    ///
+    /// This will never panic nor fail.
     fn push_str(&mut self, s: &str) {
         s.chars().for_each(|c| self.push_char(c));
     }
@@ -25,13 +42,14 @@ pub trait StringBuffer {
     fn as_slices(&self) -> (&str, &str);
 
     /// Copies data as required to make the head the start of the buffer. This allocates a temporary
-    /// buffer the size of the smaller &str given by ```as_slices()```.
+    /// buffer the size of the smaller &str given by [`as_slices`](StringBuffer::as_slices).
     ///
     /// This is required to represent the entire buffer as a single &str.
     fn align(&mut self);
 
-    /// Aligns the head of the buffer to the start via rotation. Compared to ```align``` this
-    /// function does not allocate any memory; however, it works in O(```buffer.len()```) time.
+    /// Aligns the head of the buffer to the start via rotation. Compared to
+    /// [`align`](StringBuffer::align) this function does not allocate any memory; however, it works
+    /// in O([`buffer.len()`](StringBuffer::len)) time.
     ///
     /// This is required to represent the entire buffer as a single &str.
     fn align_no_alloc(&mut self);
@@ -42,22 +60,29 @@ pub trait StringBuffer {
     /// Returns true if there is no data in the buffer.
     fn is_empty(&self) -> bool;
 
+    /// The number of bytes this buffer can hold. Not the number of chars or graphemes.
     fn capacity(&self) -> usize;
 
+    /// Returns an iterator over the characters in the buffer. This includes both slices, in order,
+    /// if the buffer is currently split.
     fn chars(&self) -> Chain<Chars<'_>, Chars<'_>> {
         let (front, back) = self.as_slices();
         front.chars().chain(back.chars())
     }
 
+    /// Empties the buffer
     fn clear(&mut self);
 }
 
+/// An implementation of [`StringBuffer`](StringBuffer) using const generics to store its data on
+/// the stack.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct StRingBuffer<const SIZE: usize> {
     data: [u8; SIZE],
     state: State,
 }
 
+/// An implementation of [`StringBuffer`](StringBuffer) that stores its data on the heap.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HeapStRingBuffer {
     data: Box<[u8]>,
@@ -163,6 +188,8 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
 }
 
 impl<const SIZE: usize> StRingBuffer<SIZE> {
+
+    /// Creates a new StRingBuffer on the stack using the const generic size.
     pub const fn new() -> Self {
         Self {
             data: [0; SIZE],
@@ -176,6 +203,8 @@ impl StringBuffer for HeapStRingBuffer {
 }
 
 impl HeapStRingBuffer {
+
+    /// Creates a new HeapStRingBuffer on the heap using the given size.
     pub fn new(size: usize) -> Self {
         HeapStRingBuffer{
             data: vec![0; size].into_boxed_slice(),
