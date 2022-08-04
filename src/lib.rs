@@ -1,17 +1,20 @@
+#![no_std]
 
-#![cfg_attr(not(feature = "std"), no_std)]
+extern crate alloc;
 
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::vec;
 use core::cmp::Ordering;
 use core::iter::Chain;
 use core::str::{Chars, from_utf8_unchecked};
-
 
 pub trait StringBuffer {
     /// Adds a char to the buffer. Overwrites the start if the buffer is full.
     fn push_char(&mut self, c: char);
 
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
-    fn push_str(&mut self, s: &str){
+    fn push_str(&mut self, s: &str) {
         s.chars().for_each(|c| self.push_char(c));
     }
 
@@ -21,13 +24,22 @@ pub trait StringBuffer {
     /// reference will be an empty &str.
     fn as_slices(&self) -> (&str, &str);
 
-    /// Copies data as required to make the head the start of the buffer. Required to represent the
-    /// entire buffer as a single &str.
+    /// Copies data as required to make the head the start of the buffer. This allocates a temporary
+    /// buffer the size of the smaller &str given by ```as_slices()```.
+    ///
+    /// This is required to represent the entire buffer as a single &str.
     fn align(&mut self);
+
+    /// Aligns the head of the buffer to the start via rotation. Compared to ```align``` this
+    /// function does not allocate any memory; however, it works in O(```buffer.len()```) time.
+    ///
+    /// This is required to represent the entire buffer as a single &str.
+    fn align_no_alloc(&mut self);
 
     /// Returns the length of this buffer, in bytes, not chars or graphemes
     fn len(&self) -> usize;
 
+    /// Returns true if there is no data in the buffer.
     fn is_empty(&self) -> bool;
 
     fn capacity(&self) -> usize;
@@ -46,7 +58,6 @@ pub struct StRingBuffer<const SIZE: usize> {
     state: State,
 }
 
-#[cfg(all(feature = "std", feature = "alloc"))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HeapStRingBuffer {
     data: Box<[u8]>,
@@ -84,9 +95,7 @@ macro_rules! impl_buffer_trait {
             }
         }
 
-        #[cfg(feature = "alloc")]
         fn align(&mut self) {
-            extern crate alloc;
             match self.state {
                 State::Empty | State::Straight { .. } => {}
                 State::Looped { first, end_offset, next } => {
@@ -96,6 +105,26 @@ macro_rules! impl_buffer_trait {
                     let first_len = capacity_minus_offset - first;
                     self.data.copy_within(first..capacity_minus_offset, 0);
                     self.data[first_len..].copy_from_slice(&copy);
+                    self.state = State::Straight {count: len};
+                }
+            }
+        }
+
+        fn align_no_alloc(&mut self) {
+            match self.state {
+                State::Empty | State::Straight { .. } => {}
+                State::Looped { first, end_offset, next } => {
+                    let len = if next == first {
+                        let len = self.data.len() - end_offset as usize;
+                        self.data[..len].rotate_left(first);
+                        len
+                    } else {
+                        let first_len = self.data.len() - end_offset as usize;
+                        let second_len = next;
+                        self.data.rotate_left(first);
+                        self.data[first_len..].rotate_left(end_offset as usize);
+                        first_len + second_len
+                    };
                     self.state = State::Straight {count: len};
                 }
             }
@@ -131,27 +160,6 @@ macro_rules! impl_buffer_trait {
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
-
-    #[cfg(not(feature = "alloc"))]
-    fn align(&mut self) {
-        match self.state {
-            State::Empty | State::Straight { .. } => {}
-            State::Looped { first, end_offset, next } => {
-                let len = if next == first {
-                    let len = self.data.len() - end_offset as usize;
-                    self.data[..len].rotate_left(first);
-                    len
-                } else {
-                    let first_len = self.data.len() - end_offset as usize;
-                    let second_len = next;
-                    self.data.rotate_left(first);
-                    self.data[first_len..].rotate_left(end_offset as usize);
-                    first_len + second_len
-                };
-                self.state = State::Straight {count: len};
-            }
-        }
-    }
 }
 
 impl<const SIZE: usize> StRingBuffer<SIZE> {
@@ -163,12 +171,10 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
     }
 }
 
-#[cfg(all(feature = "std", feature = "alloc"))]
 impl StringBuffer for HeapStRingBuffer {
     impl_buffer_trait!();
 }
 
-#[cfg(all(feature = "std", feature = "alloc"))]
 impl HeapStRingBuffer {
     pub fn new(size: usize) -> Self {
         HeapStRingBuffer{
@@ -270,14 +276,12 @@ impl State {
 mod tests {
     use test_case::test_case;
 
-    #[cfg(all(feature = "std", feature = "alloc"))]
-    use crate::HeapStRingBuffer;
     use crate::{next_char_boundary, StRingBuffer, StringBuffer};
+    use crate::HeapStRingBuffer;
 
     const SMALL_SIZE: usize = 5;
     const SMALL_CONST: StRingBuffer<SMALL_SIZE> = StRingBuffer::new();
 
-    #[cfg(all(feature = "std", feature = "alloc"))]
     fn small_heap() -> HeapStRingBuffer{
         HeapStRingBuffer::new(SMALL_SIZE)
     }
@@ -289,8 +293,8 @@ mod tests {
         first.chars().chain(second.chars()).zip(test.chars()).for_each(|(expected, given)|assert_eq!(expected, given));
     }
 
-    #[test_case(&mut SMALL_CONST.clone())]
-    #[cfg_attr(all(feature = "std", feature = "alloc"), test_case(&mut small_heap()))]
+    #[test_case(& mut SMALL_CONST.clone())]
+    #[test_case(& mut small_heap())]
     fn basic(test: &mut impl StringBuffer){
         assert!(test.is_empty());
         test.push_char('A');
@@ -307,8 +311,8 @@ mod tests {
         verify(test, 5, "BCDEX", "");
     }
 
-    #[test_case(&mut StRingBuffer::<3>::new())]
-    #[cfg_attr(all(feature = "std", feature = "alloc"), test_case(&mut HeapStRingBuffer::new(3)))]
+    #[test_case(& mut StRingBuffer::< 3 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(3))]
     fn two_byte(test: &mut impl StringBuffer) {
         assert!(test.is_empty());
         assert_eq!(test.capacity(), 3);
@@ -345,8 +349,8 @@ mod tests {
         verify(test, 1, "A", "");
     }
 
-    #[test_case(&mut StRingBuffer::<3>::new())]
-    #[cfg_attr(all(feature = "std", feature = "alloc"), test_case(&mut HeapStRingBuffer::new(3)))]
+    #[test_case(& mut StRingBuffer::< 3 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(3))]
     fn too_big(test: &mut impl StringBuffer) {
         assert!(test.is_empty());
         //four bytes (too big for buffer)
@@ -355,8 +359,8 @@ mod tests {
         verify(test, 0, "", "");
     }
 
-    #[test_case(&mut StRingBuffer::<5>::new())]
-    #[cfg_attr(all(feature = "std", feature = "alloc"), test_case(&mut HeapStRingBuffer::new(5)))]
+    #[test_case(& mut StRingBuffer::< 5 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(5))]
     fn big_edge(test: &mut impl StringBuffer) {
         assert!(test.is_empty());
         test.push_str("ABCD");

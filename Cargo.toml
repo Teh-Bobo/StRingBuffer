@@ -3,12 +3,5 @@ name = "st_ring_buffer"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["std", "alloc"]
-std = []
-alloc = []
-
-[dependencies]
-
 [dev-dependencies]
 test-case = "2"
