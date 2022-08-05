@@ -409,6 +409,50 @@ mod tests {
         verify(test, 3, "Ꙃ", "");
     }
 
+    #[test_case(& mut StRingBuffer::< 5 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(5))]
+    fn align(test: &mut impl StringBuffer) {
+        test.push_str("ABCDE");
+        verify(test, 5, "ABCDE", "");
+
+        test.push_char('F');
+        verify(test, 5, "BCDE", "F");
+        test.align();
+        verify(test, 5, "BCDEF", "");
+
+        test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        verify(test, 5, "DEF", "ƛ");
+        test.align();
+        verify(test, 5, "DEFƛ", "");
+
+        test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        verify(test, 5, "ƛ", "Ꙃ");
+        test.align();
+        verify(test, 5, "ƛꙂ", "");
+    }
+
+    #[test_case(& mut StRingBuffer::< 5 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(5))]
+    fn align_linear(test: &mut impl StringBuffer) {
+        test.push_str("ABCDE");
+        verify(test, 5, "ABCDE", "");
+
+        test.push_char('F');
+        verify(test, 5, "BCDE", "F");
+        test.align_no_alloc();
+        verify(test, 5, "BCDEF", "");
+
+        test.push_char('ƛ'); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        verify(test, 5, "DEF", "ƛ");
+        test.align_no_alloc();
+        verify(test, 5, "DEFƛ", "");
+
+        test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        verify(test, 5, "ƛ", "Ꙃ");
+        test.align_no_alloc();
+        verify(test, 5, "ƛꙂ", "");
+    }
+
     #[test]
     fn char_boundary_simple() {
         let data = "ABCD".as_bytes();
