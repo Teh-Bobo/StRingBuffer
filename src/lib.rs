@@ -315,8 +315,13 @@ mod tests {
         HeapStRingBuffer::new(SMALL_SIZE)
     }
 
+    fn verify_empty(test: &impl StringBuffer) {
+        verify(test, 0, "", "");
+    }
+
     fn verify(test: &impl StringBuffer, expected_len: usize, first: &str, second: &str) {
         assert_eq!(test.len(), expected_len);
+        assert_eq!(test.is_empty(), expected_len == 0);
         assert_eq!(test.as_slices().0, first);
         assert_eq!(test.as_slices().1, second);
         first.chars().chain(second.chars()).zip(test.chars()).for_each(|(expected, given)|assert_eq!(expected, given));
@@ -325,7 +330,7 @@ mod tests {
     #[test_case(& mut SMALL_CONST.clone())]
     #[test_case(& mut small_heap())]
     fn basic(test: &mut impl StringBuffer){
-        assert!(test.is_empty());
+        verify_empty(test);
         test.push_char('A');
         verify(test, 1, "A", "");
 
@@ -338,12 +343,15 @@ mod tests {
 
         test.align();
         verify(test, 5, "BCDEX", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 3 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(3))]
     fn two_byte(test: &mut impl StringBuffer) {
-        assert!(test.is_empty());
+        verify_empty(test);
         assert_eq!(test.capacity(), 3);
         test.push_str("ABC");
         //[^A, B, C*]
@@ -376,22 +384,28 @@ mod tests {
         test.push_char('A');
         //[^A*, _, _]
         verify(test, 1, "A", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 3 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(3))]
     fn too_big(test: &mut impl StringBuffer) {
-        assert!(test.is_empty());
+        verify_empty(test);
         //four bytes (too big for buffer)
         test.push_char('🦀'); //Crab Emoji (Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
         //[^_*, _, _]
         verify(test, 0, "", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 5 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(5))]
     fn big_edge(test: &mut impl StringBuffer) {
-        assert!(test.is_empty());
+        verify_empty(test);
         test.push_str("ABCD");
         //[^A, B, C, D*, _]
         verify(test, 4, "ABCD","");
@@ -407,11 +421,15 @@ mod tests {
         test.push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
         //[^0xEA, 0x99, 0x82*, _, _]
         verify(test, 3, "Ꙃ", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 5 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(5))]
     fn align(test: &mut impl StringBuffer) {
+        verify_empty(test);
         test.push_str("ABCDE");
         verify(test, 5, "ABCDE", "");
 
@@ -429,11 +447,15 @@ mod tests {
         verify(test, 5, "ƛ", "Ꙃ");
         test.align();
         verify(test, 5, "ƛꙂ", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 5 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(5))]
     fn align_linear(test: &mut impl StringBuffer) {
+        verify_empty(test);
         test.push_str("ABCDE");
         verify(test, 5, "ABCDE", "");
 
@@ -451,6 +473,9 @@ mod tests {
         verify(test, 5, "ƛ", "Ꙃ");
         test.align_no_alloc();
         verify(test, 5, "ƛꙂ", "");
+
+        test.clear();
+        verify_empty(test);
     }
 
     #[test]
