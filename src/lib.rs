@@ -79,6 +79,7 @@ pub trait StringBuffer {
 
 /// An implementation of [`StringBuffer`](StringBuffer) using const generics to store its data on
 /// the stack.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct StRingBuffer<const SIZE: usize> {
     data: [u8; SIZE],
@@ -86,6 +87,7 @@ pub struct StRingBuffer<const SIZE: usize> {
 }
 
 /// An implementation of [`StringBuffer`](StringBuffer) that stores its data on the heap.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct HeapStRingBuffer {
     data: Box<[u8]>,
@@ -274,6 +276,7 @@ fn next_char_boundary(data: &[u8], start: usize) -> Option<usize> {
         .map(|(i, _)| i + start)
 }
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum State {
     #[default]
