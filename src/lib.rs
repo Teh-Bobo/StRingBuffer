@@ -574,4 +574,18 @@ mod tests {
         buffer.clear();
         basic(&mut buffer);
     }
+
+    #[test]
+    fn test_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<StRingBuffer<0>>();
+        assert_send::<HeapStRingBuffer>();
+    }
+
+    #[test]
+    fn test_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<StRingBuffer<0>>();
+        assert_sync::<HeapStRingBuffer>();
+    }
 }
