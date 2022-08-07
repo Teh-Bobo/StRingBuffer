@@ -13,6 +13,7 @@ extern crate alloc;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec;
 use core::cmp::Ordering;
 use core::fmt::Formatter;
@@ -217,6 +218,16 @@ impl core::fmt::Display for HeapStRingBuffer {
     }
 }
 
+impl From<String> for HeapStRingBuffer {
+    fn from(s: String) -> Self {
+        let len = s.len();
+        HeapStRingBuffer {
+            data: s.into_boxed_str().into_boxed_bytes(),
+            state: State::Straight { count: len }
+        }
+    }
+}
+
 impl HeapStRingBuffer {
 
     /// Creates a new HeapStRingBuffer on the heap using the given size.
@@ -318,6 +329,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
     use test_case::test_case;
 
     use crate::{next_char_boundary, StRingBuffer, StringBuffer};
@@ -527,5 +539,14 @@ mod tests {
         assert_eq!(next_char_boundary(data,1), Some(1));
         assert_eq!(next_char_boundary(data,2), None);
         assert_eq!(next_char_boundary(data,3), None);
+    }
+
+    #[test]
+    fn from_string() {
+        let mut buffer: HeapStRingBuffer = "ABCDE".to_string().into();
+        verify(&mut buffer, 5, "ABCDE", "");
+
+        buffer.clear();
+        basic(&mut buffer);
     }
 }
