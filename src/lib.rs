@@ -232,23 +232,28 @@ impl core::fmt::Display for HeapStRingBuffer {
 
 impl From<String> for HeapStRingBuffer {
     fn from(s: String) -> Self {
-        s.into_bytes().into()
-    }
-}
-
-impl From<Vec<u8>> for HeapStRingBuffer {
-    fn from(v: Vec<u8>) -> Self {
-        v.into_boxed_slice().into()
-    }
-}
-
-impl From<Box<[u8]>> for HeapStRingBuffer {
-    fn from(b: Box<[u8]>) -> Self {
-        let count = b.len();
+        let count = s.len();
+        let data = s.into_boxed_str().into_boxed_bytes();
         HeapStRingBuffer {
-            data: b,
+            data,
             state: State::Straight { count },
         }
+    }
+}
+
+impl TryFrom<Vec<u8>> for HeapStRingBuffer {
+    type Error = alloc::string::FromUtf8Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(String::from_utf8(value)?.into())
+    }
+}
+
+impl TryFrom<Box<[u8]>> for HeapStRingBuffer {
+    type Error = alloc::string::FromUtf8Error;
+
+    fn try_from(value: Box<[u8]>) -> Result<Self, Self::Error> {
+        Ok(String::from_utf8(value.into())?.into())
     }
 }
 
@@ -569,6 +574,24 @@ mod tests {
     #[test]
     fn from_string() {
         let mut buffer: HeapStRingBuffer = "ABCDE".to_string().into();
+        verify(&mut buffer, 5, "ABCDE", "");
+
+        buffer.clear();
+        basic(&mut buffer);
+    }
+
+    #[test]
+    fn from_vec() {
+        let mut buffer: HeapStRingBuffer = "ABCDE".as_bytes().to_vec().try_into().unwrap();
+        verify(&mut buffer, 5, "ABCDE", "");
+
+        buffer.clear();
+        basic(&mut buffer);
+    }
+
+    #[test]
+    fn from_box_slice() {
+        let mut buffer: HeapStRingBuffer = "ABCDE".as_bytes().to_vec().into_boxed_slice().try_into().unwrap();
         verify(&mut buffer, 5, "ABCDE", "");
 
         buffer.clear();
