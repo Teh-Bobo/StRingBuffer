@@ -129,13 +129,21 @@ macro_rules! impl_buffer_trait {
             match self.state {
                 State::Empty | State::Straight { .. } => {}
                 State::Looped { first, end_offset, next } => {
-                    let copy = self.data[0..next].to_owned();
-                    let len = self.len();
+                    let count = self.len();
                     let capacity_minus_offset = self.capacity() - end_offset as usize;
                     let first_len = capacity_minus_offset - first;
-                    self.data.copy_within(first..capacity_minus_offset, 0);
-                    self.data[first_len..].copy_from_slice(&copy);
-                    self.state = State::Straight {count: len};
+
+                    if first_len < next {
+                        let copy = self.data[first..capacity_minus_offset].to_owned();
+                        self.data.copy_within(0..next, first_len);
+                        self.data[0..first_len].copy_from_slice(&copy);
+                    } else {
+                        let copy = self.data[0..next].to_owned();
+                        self.data.copy_within(first..capacity_minus_offset, 0);
+                        self.data[first_len..].copy_from_slice(&copy);
+                    }
+
+                    self.state = State::Straight {count};
                 }
             }
         }
