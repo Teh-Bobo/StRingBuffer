@@ -15,6 +15,7 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::vec;
 use core::cmp::Ordering;
+use core::fmt::Formatter;
 use core::iter::Chain;
 use core::str::{Chars, from_utf8_unchecked};
 
@@ -187,6 +188,13 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
 }
 
+impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let (first, second) = self.as_slices();
+        write!(f, "({first}, {second})")
+    }
+}
+
 impl<const SIZE: usize> StRingBuffer<SIZE> {
 
     /// Creates a new StRingBuffer on the stack using the const generic size.
@@ -200,6 +208,13 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 
 impl StringBuffer for HeapStRingBuffer {
     impl_buffer_trait!();
+}
+
+impl core::fmt::Display for HeapStRingBuffer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let (first, second) = self.as_slices();
+        write!(f, "({first}, {second})")
+    }
 }
 
 impl HeapStRingBuffer {
