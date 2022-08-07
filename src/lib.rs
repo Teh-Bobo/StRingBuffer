@@ -15,6 +15,7 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt::Formatter;
 use core::iter::Chain;
@@ -196,6 +197,15 @@ impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
     }
 }
 
+impl<const SIZE: usize> From<[u8; SIZE]> for StRingBuffer<SIZE> {
+    fn from(data: [u8; SIZE]) -> Self {
+        StRingBuffer {
+            data,
+            state: State::Empty,
+        }
+    }
+}
+
 impl<const SIZE: usize> StRingBuffer<SIZE> {
 
     /// Creates a new StRingBuffer on the stack using the const generic size.
@@ -220,10 +230,22 @@ impl core::fmt::Display for HeapStRingBuffer {
 
 impl From<String> for HeapStRingBuffer {
     fn from(s: String) -> Self {
-        let len = s.len();
+        s.into_bytes().into()
+    }
+}
+
+impl From<Vec<u8>> for HeapStRingBuffer {
+    fn from(v: Vec<u8>) -> Self {
+        v.into_boxed_slice().into()
+    }
+}
+
+impl From<Box<[u8]>> for HeapStRingBuffer {
+    fn from(b: Box<[u8]>) -> Self {
+        let count = b.len();
         HeapStRingBuffer {
-            data: s.into_boxed_str().into_boxed_bytes(),
-            state: State::Straight { count: len }
+            data: b,
+            state: State::Straight { count },
         }
     }
 }
