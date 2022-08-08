@@ -198,6 +198,13 @@ macro_rules! impl_buffer_trait {
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
+
+    fn push_str(&mut self, s: &str) {
+        unsafe {
+            //SAFETY: we know that s is a valid utf-8 byte sequence because it's a &str
+            self.state.insert_bytes(&mut self.data, s.as_bytes());
+        }
+    }
 }
 
 impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
@@ -282,6 +289,15 @@ const fn is_utf8_char_boundary(b: u8) -> bool {
     (b as i8) >= -0x40
 }
 
+//Only returns None if 0 is not a char boundary--which is illegal state
+fn prev_char_boundary(data: &[u8], start: usize) -> Option<usize> {
+    data[..=start].iter()
+        .rev()
+        .enumerate()
+        .find(|(_, b)| is_utf8_char_boundary(**b))
+        .map(|(i, _)| start - i)
+}
+
 fn next_char_boundary(data: &[u8], start: usize) -> Option<usize> {
     data[start.min(data.len())..].iter()
         .enumerate()
@@ -299,6 +315,8 @@ enum State {
 }
 
 impl State {
+    /// Returns the slice of data where the char should be inserted; modifying the state to prepare
+    /// for the insert if necessary.
     fn get_char_slice<'a>(&'a mut self, char_len: usize, data: &'a mut [u8]) -> &'a mut [u8] {
         match self {
             State::Empty => {
@@ -307,7 +325,7 @@ impl State {
             }
             State::Straight { count } => {
                 if *count + char_len > data.len() {
-                    //char doesn't fit in straight, need to loop
+                    //char doesn't fit in straight, need to convert to looped
                     let end_offset = (data.len() - *count).try_into().unwrap();
                     let first = next_char_boundary(&data[..*count], char_len);
                     *self = match first {
@@ -362,6 +380,75 @@ impl State {
             }
         }
     }
+
+    /// Inserts bytes into data, while ensuring the State remains valid.
+    ///
+    /// Returns the number of bytes copied. If this is less than bytes.len() and the return value is
+    /// n then the bytes copied is `bytes[(bytes.len() - n)..]`.
+    ///
+    /// Safety
+    /// bytes must be a valid utf-8 sequence. If its not then any reads from the buffer will result
+    /// in undefined behavior.
+    unsafe fn insert_bytes(&mut self, data: &mut [u8], bytes: &[u8]) -> usize {
+        if bytes.is_empty() { return 0 }
+        //to save testing for this in every branch. Slice version of modulo
+        let bytes = if bytes.len() <= data.len() {
+            bytes
+        } else {
+            &bytes[(bytes.len() - data.len())..]
+        };
+        match self {
+            State::Empty => {
+                let bytes_len = bytes.len();
+                let count = if bytes_len <= data.len() {
+                    data[..bytes_len].copy_from_slice(bytes);
+                    bytes_len
+                } else {
+                    match next_char_boundary(bytes, bytes_len - data.len()) {
+                        None => return 0,
+                        Some(start) => {
+                            let len = bytes_len - start;
+                            data[..len].copy_from_slice(&bytes[start..]);
+                            len
+                        }
+                    }
+                };
+                *self = State::Straight {count};
+                count
+            }
+            State::Straight { count } => {
+                let bytes_len = bytes.len();
+                if *count + bytes_len <= data.len() {
+                    //everything fits
+                    data[*count..(*count + bytes_len)].copy_from_slice(bytes);
+                    *count += bytes_len;
+                } else {
+                    //doesn't fit
+                    //start by finding the partition point
+                    let first_len = data.len() - *count;
+                    let index = prev_char_boundary(bytes, first_len)
+                        .expect("Tried to insert bytes with malformed utf-8");
+                    let (first, second) = bytes.split_at(index);
+
+                    //copy first and calculate the end_offset
+                    let end_offset = (first_len - first.len()).try_into().unwrap();
+                    data[*count..first.len()].copy_from_slice(first);
+
+                    data[..second.len()].copy_from_slice(second);
+
+                    *self = State::Looped {
+                        first: second.len(),
+                        end_offset,
+                        next: second.len()
+                    }
+                }
+                bytes_len
+            }
+            State::Looped { first, end_offset, next } => {
+                todo!()
+            }
+        }
+    }
 }
 
 
@@ -370,7 +457,7 @@ mod tests {
     use alloc::string::ToString;
     use test_case::test_case;
 
-    use crate::{next_char_boundary, StRingBuffer, StringBuffer};
+    use crate::{next_char_boundary, prev_char_boundary, StRingBuffer, StringBuffer};
     use crate::HeapStRingBuffer;
 
     const SMALL_SIZE: usize = 5;
@@ -544,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn char_boundary_simple() {
+    fn next_char_boundary_simple() {
         let data = "ABCD".as_bytes();
         assert_eq!(next_char_boundary(data, 0), Some(0));
         assert_eq!(next_char_boundary(data, 1), Some(1));
@@ -553,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn char_boundary_two_byte() {
+    fn next_char_boundary_two_byte() {
         let data = "AƟB".as_bytes();
         assert_eq!(next_char_boundary(data,0), Some(0));
         assert_eq!(next_char_boundary(data,1), Some(1));
@@ -562,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn char_boundary_three_byte() {
+    fn next_char_boundary_three_byte() {
         let data = "ꙂB".as_bytes();
         assert_eq!(next_char_boundary(data, 0), Some(0));
         assert_eq!(next_char_boundary(data,1), Some(3));
@@ -571,12 +658,48 @@ mod tests {
     }
 
     #[test]
-    fn char_boundary_none() {
+    fn next_char_boundary_none() {
         let data = "AꙂ".as_bytes();
         assert_eq!(next_char_boundary(data, 0), Some(0));
         assert_eq!(next_char_boundary(data,1), Some(1));
         assert_eq!(next_char_boundary(data,2), None);
         assert_eq!(next_char_boundary(data,3), None);
+    }
+
+    #[test]
+    fn prev_char_boundary_simple() {
+        let data = "ABCD".as_bytes();
+        assert_eq!(prev_char_boundary(data, 0), Some(0));
+        assert_eq!(prev_char_boundary(data, 1), Some(1));
+        assert_eq!(prev_char_boundary(data, 2), Some(2));
+        assert_eq!(prev_char_boundary(data, 3), Some(3));
+    }
+
+    #[test]
+    fn prev_char_boundary_two_byte() {
+        let data = "AƟB".as_bytes();
+        assert_eq!(prev_char_boundary(data,0), Some(0));
+        assert_eq!(prev_char_boundary(data,1), Some(1));
+        assert_eq!(prev_char_boundary(data,2), Some(1));
+        assert_eq!(prev_char_boundary(data,3), Some(3));
+    }
+
+    #[test]
+    fn prev_char_boundary_three_byte() {
+        let data = "ꙂB".as_bytes();
+        assert_eq!(prev_char_boundary(data, 0), Some(0));
+        assert_eq!(prev_char_boundary(data,1), Some(0));
+        assert_eq!(prev_char_boundary(data,2), Some(0));
+        assert_eq!(prev_char_boundary(data,3), Some(3));
+    }
+
+    #[test]
+    fn prev_char_boundary_none() {
+        let data = "AꙂ".as_bytes();
+        assert_eq!(prev_char_boundary(data, 0), Some(0));
+        assert_eq!(prev_char_boundary(data,1), Some(1));
+        assert_eq!(prev_char_boundary(data,2), Some(1));
+        assert_eq!(prev_char_boundary(data,3), Some(1));
     }
 
     #[test]
