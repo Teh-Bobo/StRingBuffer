@@ -460,13 +460,6 @@ mod tests {
     use crate::{next_char_boundary, prev_char_boundary, StRingBuffer, StringBuffer};
     use crate::HeapStRingBuffer;
 
-    const SMALL_SIZE: usize = 5;
-    const SMALL_CONST: StRingBuffer<SMALL_SIZE> = StRingBuffer::new();
-
-    fn small_heap() -> HeapStRingBuffer{
-        HeapStRingBuffer::new(SMALL_SIZE)
-    }
-
     fn verify_empty(test: &impl StringBuffer) {
         verify(test, 0, "", "");
     }
@@ -479,8 +472,8 @@ mod tests {
         first.chars().chain(second.chars()).zip(test.chars()).for_each(|(expected, given)|assert_eq!(expected, given));
     }
 
-    #[test_case(& mut SMALL_CONST.clone())]
-    #[test_case(& mut small_heap())]
+    #[test_case(& mut StRingBuffer::< 5 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(5))]
     fn basic(test: &mut impl StringBuffer){
         verify_empty(test);
         test.push_char('A');
@@ -489,7 +482,6 @@ mod tests {
         test.push_str("BCDE");
         verify(test, 5, "ABCDE", "");
 
-        assert_eq!(SMALL_SIZE, 5);
         test.push_char('X');
         verify(test, 5, "BCDE", "X");
 
