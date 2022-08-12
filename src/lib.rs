@@ -318,6 +318,7 @@ impl State {
     /// Returns the slice of data where the char should be inserted; modifying the state to prepare
     /// for the insert if necessary.
     fn get_char_slice<'a>(&'a mut self, char_len: usize, data: &'a mut [u8]) -> &'a mut [u8] {
+        debug_assert!(char_len < data.len());
         match self {
             State::Empty => {
                 *self = State::Straight { count: char_len };
@@ -327,8 +328,7 @@ impl State {
                 if *count + char_len > data.len() {
                     //char doesn't fit in straight, need to convert to looped
                     let end_offset = (data.len() - *count).try_into().unwrap();
-                    let first = next_char_boundary(&data[..*count], char_len);
-                    *self = match first {
+                    *self = match next_char_boundary(&data[..*count], char_len) {
                         //nothing found, this should only happen if the buffer
                         //is small and adding this char overlaps the end and causes
                         //the char to be written from the start--clearing the existing buffer
@@ -351,15 +351,14 @@ impl State {
             State::Looped { first, end_offset, next } => {
                 if *first - *next < char_len {
                     //first needs to move
-                    let new_first = next_char_boundary(data, *first + char_len);
-                    match new_first {
+                    match next_char_boundary(data, *first + char_len) {
                         None => {
                             //first needs to loop back to the start (back to straight)
                             *self = State::Straight {count: *next};
                             // head down the straight pipeline
                             self.get_char_slice(char_len, data)
                         }
-                        Some(nf) => {
+                        Some(new_first) => {
                             let next_copy = *next;
                             let new_next = next_copy + char_len;
                             if new_next > data.len() - *end_offset as usize {
@@ -367,7 +366,7 @@ impl State {
                                 *end_offset = (data.len() - new_next).try_into().unwrap();
                             }
                             *next = new_next;
-                            *first = nf;
+                            *first = new_first;
                             &mut data[next_copy..new_next]
                         }
                     }
@@ -386,17 +385,32 @@ impl State {
     /// Returns the number of bytes copied. If this is less than bytes.len() and the return value is
     /// n then the bytes copied is `bytes[(bytes.len() - n)..]`.
     ///
-    /// Safety
-    /// bytes must be a valid utf-8 sequence. If its not then any reads from the buffer will result
+    /// # Safety
+    /// `bytes` must be a valid utf-8 sequence. If its not then any reads from `data` will result
     /// in undefined behavior.
     unsafe fn insert_bytes(&mut self, data: &mut [u8], bytes: &[u8]) -> usize {
         if bytes.is_empty() { return 0 }
-        //to save testing for this in every branch. Slice version of modulo
-        let bytes = if bytes.len() <= data.len() {
-            bytes
-        } else {
-            &bytes[(bytes.len() - data.len())..]
-        };
+        else if bytes.len() > data.len() {
+            let bytes_start_index = bytes.len() - data.len();
+            return match next_char_boundary(bytes, bytes_start_index) {
+                None => {
+                    // there is no valid char boundary between where the split needs to be and the
+                    // end. Treat the buffer like the start was written and then overwritten by
+                    // later data and clear the buffer
+                    *self = State::Empty;
+                    0
+                }
+                Some(start_index) => {
+                    data.copy_from_slice(&bytes[start_index..]);
+                    *self = State::Straight {count: data.len()};
+                    data.len()
+                }
+            };
+        } else if bytes.len() == data.len() {
+            data.copy_from_slice(bytes);
+            *self = State::Straight {count: data.len()};
+            return data.len();
+        }
         match self {
             State::Empty => {
                 let bytes_len = bytes.len();
@@ -423,29 +437,69 @@ impl State {
                     data[*count..(*count + bytes_len)].copy_from_slice(bytes);
                     *count += bytes_len;
                 } else {
-                    //doesn't fit
-                    //start by finding the partition point
+                    // doesn't fit
+                    // start by finding where to split bytes. The first half will be inserted after
+                    // count, while the second half will loop back to the start
                     let first_len = data.len() - *count;
                     let index = prev_char_boundary(bytes, first_len)
                         .expect("Tried to insert bytes with malformed utf-8");
                     let (first, second) = bytes.split_at(index);
+                    let end_offset = (first_len - first.len()).try_into().unwrap();
 
                     //copy first and calculate the end_offset
-                    let end_offset = (first_len - first.len()).try_into().unwrap();
-                    data[*count..first.len()].copy_from_slice(first);
-
+                    data[*count..(*count + first.len())].copy_from_slice(first);
                     data[..second.len()].copy_from_slice(second);
 
-                    *self = State::Looped {
-                        first: second.len(),
-                        end_offset,
-                        next: second.len()
-                    }
+                    // find where the head should be
+                    let search_range = if first.is_empty() {
+                        // we didn't insert anything after count and we looped around so everything
+                        // after count is "empty"
+                        &data[..*count]
+                    } else {
+                        // if first was not empty then first may need to be the first char that
+                        // was inserted from bytes
+                        &data[..=*count]
+                    };
+                    match next_char_boundary(search_range, second.len()) {
+                        None => *count = second.len(),
+                        Some(new_first) => *self = State::Looped {
+                            first: new_first,
+                            end_offset,
+                            next: second.len(),
+                        },
+                    };
+
                 }
                 bytes_len
             }
             State::Looped { first, end_offset, next } => {
-                todo!()
+                if *first - *next >= bytes.len() {
+                    // big enough gap between first and next to fit the bytes
+                    data[*next..(*next + bytes.len())].copy_from_slice(bytes);
+                    *next += bytes.len();
+                } else {
+                    //first needs to move
+                    match next_char_boundary(data, *first + bytes.len()) {
+                        None => {
+                            // first loops back to the start (straight)
+                            *self = State::Straight {count: *next};
+                            // finish in the straight pipeline
+                            self.insert_bytes(data, bytes);
+                        }
+                        Some(new_first) => {
+                            let new_next = *next + bytes.len();
+                            if new_next > data.len() - *end_offset as usize {
+                                //char insert overwrites end offset
+                                *end_offset = (data.len() - new_next).try_into().unwrap();
+                            }
+                            data[*next..new_next].copy_from_slice(bytes);
+                            *next = new_next;
+                            *first = new_first;
+                        }
+                    }
+                }
+                // both branches always copy the whole byte slice
+                bytes.len()
             }
         }
     }
@@ -524,7 +578,8 @@ mod tests {
         //[0xC6, 0x9F, *^C]
         verify(test, 3, "C", "Ɵ");
 
-        test.push_str("XY");
+        test.push_char('X');
+        test.push_char('Y');
         //[Y*, _, ^X]
         verify(test, 2, "X", "Y");
 
@@ -571,7 +626,7 @@ mod tests {
         //split on buffer end
         test.push_str("Z");
         //[Y, Z, *^X]
-        assert_eq!(test.len(), 3);
+        verify(test, 3, "X", "YZ");
         test.push_str("Ɵ");
         //[^0xC6, 0x9F*, _]
         verify(test, 2, "Ɵ", "");
