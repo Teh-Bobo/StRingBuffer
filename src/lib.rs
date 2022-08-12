@@ -112,8 +112,17 @@ macro_rules! impl_buffer_trait {
             c.encode_utf8(slice);
         }
 
+        fn push_str(&mut self, s: &str) {
+            unsafe {
+                //SAFETY: s is a valid utf-8 byte sequence because it's a &str
+                self.state.insert_bytes(&mut self.data, s.as_bytes());
+            }
+        }
+
         fn as_slices(&self) -> (&str, &str) {
             unsafe {
+                //SAFETY: self.data must be valid utf-8 sequence. This is ensured by any method in
+                //this trait that modifies the buffer.
                 match self.state {
                     State::Empty => ("", ""),
                     State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
@@ -198,13 +207,6 @@ macro_rules! impl_buffer_trait {
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
-
-    fn push_str(&mut self, s: &str) {
-        unsafe {
-            //SAFETY: we know that s is a valid utf-8 byte sequence because it's a &str
-            self.state.insert_bytes(&mut self.data, s.as_bytes());
-        }
-    }
 }
 
 impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
