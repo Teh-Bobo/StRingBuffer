@@ -20,6 +20,8 @@ use core::cmp::Ordering;
 use core::fmt::Formatter;
 use core::iter::Chain;
 use core::str::{Chars, from_utf8_unchecked};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// A buffer specializing in holding data for a string. Pushing data to the buffer will not fail nor
 /// panic. When full, the end of the data overwrites the start, while keeping the integrity of the
@@ -151,7 +153,6 @@ pub trait StringBuffer {
 
 /// An implementation of [`StringBuffer`](StringBuffer) using const generics to store its data on
 /// the stack.
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct StRingBuffer<const SIZE: usize> {
     data: [u8; SIZE],
