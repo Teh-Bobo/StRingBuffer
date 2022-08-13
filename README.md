@@ -48,7 +48,8 @@ fn main() {
 
 ## Time Complexity
 Pushing data into the buffer is always constant time. Aligning the buffer is also done in constant
-time using, at most, two memcopys. 
+time using, at most, two memcopys. The ```StringBuffer``` trait also provides ```align_no_alloc``` if you
+would like to perform the alignment using O(n) time, where 'n' is the length of the shortest leg of the buffer.
 
 ## No Std
 This library is nostd compatible by default.

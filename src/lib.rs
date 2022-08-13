@@ -29,11 +29,26 @@ pub trait StringBuffer {
     ///
     /// This will never panic nor fail. However, if the length of the char in utf-8 exceeds the
     /// length of the buffer then the buffer will be emptied.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0, "F");
+    /// assert_eq!(buffer.as_slices().1, "");
+    /// ```
     fn push_char(&mut self, c: char);
 
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
     ///
     /// This will never panic nor fail.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDE");
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0,"BCDE");
+    /// assert_eq!(buffer.as_slices().1, "F");
+    /// ```
     fn push_str(&mut self, s: &str) {
         s.chars().for_each(|c| self.push_char(c));
     }
@@ -42,12 +57,33 @@ pub trait StringBuffer {
     ///
     /// If the current data fits entirely in the buffer, and it is aligned, then the second
     /// reference will be an empty &str.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDE");
+    /// assert_eq!(buffer.as_slices().0, "ABCDE");
+    /// assert_eq!(buffer.as_slices().1, "");
+    ///
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0, "BCDE");
+    /// assert_eq!(buffer.as_slices().1,"F");
+    /// ```
     fn as_slices(&self) -> (&str, &str);
 
     /// Copies data as required to make the head the start of the buffer. This allocates a temporary
     /// buffer the size of the smaller &str given by [`as_slices`](StringBuffer::as_slices).
     ///
     /// This is required to represent the entire buffer as a single &str.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDE");
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0, "BCDE");
+    /// assert_eq!(buffer.as_slices().1, "F");
+    /// buffer.align();
+    /// assert_eq!(buffer.as_slices().0, "BCDEF");
+    /// ```
     fn align(&mut self);
 
     /// Aligns the head of the buffer to the start via rotation. Compared to
@@ -55,19 +91,55 @@ pub trait StringBuffer {
     /// in O([`buffer.len()`](StringBuffer::len)) time.
     ///
     /// This is required to represent the entire buffer as a single &str.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDE");
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0, "BCDE");
+    /// assert_eq!(buffer.as_slices().1, "F");
+    /// buffer.align_no_alloc();
+    /// assert_eq!(buffer.as_slices().0, "BCDEF");
+    /// ```
     fn align_no_alloc(&mut self);
 
     /// Returns the length of this buffer, in bytes, not chars or graphemes
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDEF");
+    /// assert_eq!(buffer.len(), 5);
+    /// ```
     fn len(&self) -> usize;
 
     /// Returns true if there is no data in the buffer.
     fn is_empty(&self) -> bool;
 
     /// The number of bytes this buffer can hold. Not the number of chars or graphemes.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// assert_eq!(buffer.capacity(), 5);
+    /// ```
     fn capacity(&self) -> usize;
 
     /// Returns an iterator over the characters in the buffer. This includes both slices, in order,
     /// if the buffer is currently split.
+    /// ```
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// buffer.push_str("ABCDE");
+    /// buffer.push_char('F');
+    /// assert_eq!(buffer.as_slices().0, "BCDE");
+    /// assert_eq!(buffer.as_slices().1, "F");
+    /// let mut iter = buffer.chars();
+    /// assert_eq!(Some('B'), iter.next());
+    /// assert_eq!(Some('C'), iter.next());
+    /// assert_eq!(Some('D'), iter.next());
+    /// assert_eq!(Some('E'), iter.next());
+    /// assert_eq!(Some('F'), iter.next());
+    /// assert_eq!(None, iter.next());
+    /// ```
     fn chars(&self) -> Chain<Chars<'_>, Chars<'_>> {
         let (front, back) = self.as_slices();
         front.chars().chain(back.chars())
