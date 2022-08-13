@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
 //! A ring buffer specialization for strings. The crate provides two versions of the buffer and a
@@ -23,6 +23,31 @@ use core::str::{Chars, from_utf8_unchecked};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// An error type used for the failable push functions on StringBuffer.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum StringBufferError {
+    /// Returned if the buffer has 0 bytes of free space
+    BufferFull,
+    /// Returned if the buffer does not have enough free space to fit the given string
+    NotEnoughSpaceForStr,
+    /// Returned if the buffer does not have enough free space to fit the given char
+    NotEnoughSpaceForChar,
+}
+
+impl core::fmt::Display for StringBufferError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            StringBufferError::BufferFull => "The buffer is full (0 bytes of free space).",
+            StringBufferError::NotEnoughSpaceForStr => "The buffer does not have enough space to fit the given String",
+            StringBufferError::NotEnoughSpaceForChar => "The buffer does not have enough space to fit the given char",
+        })
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for StringBufferError {}
+
 /// A buffer specializing in holding data for a string. Pushing data to the buffer will not fail nor
 /// panic. When full, the end of the data overwrites the start, while keeping the integrity of the
 /// underlying utf-8 data.
@@ -40,6 +65,11 @@ pub trait StringBuffer {
     /// ```
     fn push_char(&mut self, c: char);
 
+    /// Tries to push the given character into the buffer. Will return Ok(c.bytes_len) if the write
+    /// succeeded. If there is not enough room for the char or the buffer is full then
+    /// Err(NotEnoughSpaceForChar) or Err(BufferFull) is returned respectively.
+    fn try_push_char(&mut self, c: char) -> Result<usize, StringBufferError>;
+
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
     ///
     /// This will never panic nor fail.
@@ -53,6 +83,40 @@ pub trait StringBuffer {
     /// ```
     fn push_str(&mut self, s: &str) {
         s.chars().for_each(|c| self.push_char(c));
+    }
+
+    /// Will push as many chars as will fit into the existing space of the buffer. Will not
+    /// overwrite any existing data.
+    fn try_push_str(&mut self, s: &str) -> Result<usize, StringBufferError> {
+        if self.remaining_size() == 0 {
+            return Err(StringBufferError::BufferFull);
+        }
+
+        let mut sum = 0;
+        let mut iter = s.chars().map(|c| self.try_push_char(c));
+        while let Some(Ok(amount)) = iter.next() {
+            sum += amount;
+        }
+        if sum == 0 {
+            Err(StringBufferError::NotEnoughSpaceForStr)
+        } else {
+            Ok(sum)
+        }
+    }
+
+    /// Try to push the entire string into the buffer. If the string is too long or the buffer is
+    /// full then nothing is written and Err(NotEnoughSpaceForStr) or Err(BufferFull) is returned
+    /// respectively.
+    fn try_push_all(&mut self, s: &str) -> Result<(), StringBufferError> {
+        if self.remaining_size() == 0 {
+            return Err(StringBufferError::BufferFull);
+        }
+
+        if s.len() > self.capacity() - self.len() {
+            Ok(self.push_str(s))
+        } else {
+            Err(StringBufferError::NotEnoughSpaceForStr)
+        }
     }
 
     /// Get a reference to the two buffer segments in order.
@@ -125,6 +189,11 @@ pub trait StringBuffer {
     /// ```
     fn capacity(&self) -> usize;
 
+    /// Convenience function to return the number of bytes remaining in the buffer before data is
+    /// overwritten. This is roughly equivalent to ```self.capacity() - self.len()```, but takes into
+    /// account any padding required along the edge of the buffer.
+    fn remaining_size(&self) -> usize;
+
     /// Returns an iterator over the characters in the buffer. This includes both slices, in order,
     /// if the buffer is currently split.
     /// ```
@@ -183,6 +252,18 @@ macro_rules! impl_buffer_trait {
                 },
             };
             c.encode_utf8(slice);
+        }
+
+        fn try_push_char(&mut self, c: char) -> Result<usize, StringBufferError> {
+            let remaining_size = self.remaining_size();
+            if remaining_size == 0 {
+                Err(StringBufferError::BufferFull)
+            } else if remaining_size < c.len_utf8() {
+                Err(StringBufferError::NotEnoughSpaceForChar)
+            } else {
+                self.push_char(c);
+                Ok(c.len_utf8())
+            }
         }
 
         fn push_str(&mut self, s: &str) {
@@ -270,6 +351,13 @@ macro_rules! impl_buffer_trait {
 
         fn capacity(&self) -> usize {
             self.data.len()
+        }
+
+        fn remaining_size(&self) -> usize {
+            match self.state {
+                State::Empty | State::Straight { .. } => self.capacity() - self.len(),
+                State::Looped { end_offset, .. } => self.capacity() - self.len() - end_offset as usize,
+            }
         }
 
         fn clear(&mut self) {
@@ -586,7 +674,7 @@ mod tests {
     use alloc::string::ToString;
     use test_case::test_case;
 
-    use crate::{next_char_boundary, prev_char_boundary, StRingBuffer, StringBuffer};
+    use crate::{next_char_boundary, prev_char_boundary, StRingBuffer, StringBuffer, StringBufferError};
     use crate::HeapStRingBuffer;
 
     fn verify_empty(test: &impl StringBuffer) {
@@ -961,5 +1049,40 @@ mod tests {
         fn assert_sync<T: Sync>() {}
         assert_sync::<StRingBuffer<0>>();
         assert_sync::<HeapStRingBuffer>();
+    }
+
+    #[test_case(& mut StRingBuffer::< 3 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(3))]
+    fn try_char(test: &mut impl StringBuffer) {
+        verify_empty(test);
+        //four bytes (too big for buffer)
+        let res = test.try_push_char('🦀'); //Crab Emoji (Fat Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
+        //[^_*, _, _]
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForChar));
+        verify(test, 0, "", "");
+
+        let res = test.try_push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        //[^0xEA, 0x99, 0x82*]
+        assert_eq!(res, Ok(3));
+        verify(test, 3, "Ꙃ", "");
+
+        let res = test.try_push_char('A');
+        assert_eq!(res, Err(StringBufferError::BufferFull));
+        verify(test, 3, "Ꙃ", "");
+
+        test.clear();
+        verify_empty(test);
+    }
+
+    #[test_case(& mut StRingBuffer::< 3 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(3))]
+    fn try_str(test: &mut impl StringBuffer) {
+        todo!()
+    }
+
+    #[test_case(& mut StRingBuffer::< 3 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(3))]
+    fn try_str_all(test: &mut impl StringBuffer) {
+        todo!()
     }
 }
