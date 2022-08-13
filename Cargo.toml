@@ -1,8 +1,12 @@
 [package]
 name = "st_ring_buffer"
+description = "A fixed-size String implementation using a ring buffer"
+repository = "https://github.com/Teh-Bobo/StRingBuffer"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+keywords = ["fixed-size", "string", "ring-buffer", "queue"]
+categories = ["data-structures", "embedded", "no-std", "rust-patterns", "text-processing"]
 
 [dependencies]
 serde = { version = "1.0", optional = true, features = ["derive"] }
