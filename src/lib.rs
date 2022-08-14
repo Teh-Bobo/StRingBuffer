@@ -87,7 +87,7 @@ pub trait StringBuffer {
 
     /// Will push as many chars as will fit into the existing space of the buffer. Will not
     /// overwrite any existing data.
-    fn try_push_str(&mut self, s: &str) -> Result<usize, StringBufferError> {
+    fn try_push_some(&mut self, s: &str) -> Result<usize, StringBufferError> {
         if self.remaining_size() == 0 {
             return Err(StringBufferError::BufferFull);
         }
@@ -112,7 +112,7 @@ pub trait StringBuffer {
             return Err(StringBufferError::BufferFull);
         }
 
-        if s.len() > self.capacity() - self.len() {
+        if s.len() <= self.capacity() - self.len() {
             Ok(self.push_str(s))
         } else {
             Err(StringBufferError::NotEnoughSpaceForStr)
@@ -1070,19 +1070,68 @@ mod tests {
         assert_eq!(res, Err(StringBufferError::BufferFull));
         verify(test, 3, "Ꙃ", "");
 
+        test.push_str("AB");
+        //[^A, B, *_]
+        let res = test.try_push_char('Ꙃ'); //Cyrillic Capital Letter Dzelo (UTF-8: 0xEA 0x99 0x82)
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForChar));
+        verify(test, 2, "AB", "");
+
         test.clear();
         verify_empty(test);
     }
 
     #[test_case(& mut StRingBuffer::< 3 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(3))]
-    fn try_str(test: &mut impl StringBuffer) {
-        todo!()
+    fn try_push_some(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        let res = test.try_push_some("ABCD");
+        //[^A, B, C]*
+        assert_eq!(res, Ok(3));
+        verify(test, 3, "ABC", "");
+
+        let res = test.try_push_some("XYZ");
+        //[^A, B, C]*
+        assert_eq!(res, Err(StringBufferError::BufferFull));
+        verify(test, 3, "ABC", "");
+
+        test.push_char('X');
+        //[X, ^*B, C]
+        verify(test, 3, "BC", "X");
+
+        let res = test.try_push_some("YZ");
+        //[X, ^*B, C]
+        assert_eq!(res, Err(StringBufferError::BufferFull));
+        verify(test, 3, "BC", "X");
     }
 
     #[test_case(& mut StRingBuffer::< 3 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(3))]
     fn try_str_all(test: &mut impl StringBuffer) {
-        todo!()
+        verify_empty(test);
+
+        let res = test.try_push_all("ABCD");
+        //[^_*, _, _]
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForStr));
+        verify(test, 0, "", "");
+
+        let res = test.try_push_all("XYZ");
+        //[^X, Y, Z]*
+        assert_eq!(res, Ok(()));
+        verify(test, 3, "XYZ", "");
+
+        let res = test.try_push_all("ABC");
+        //[^X, Y, Z]*
+        assert_eq!(res, Err(StringBufferError::BufferFull));
+        verify(test, 3, "XYZ", "");
+
+        test.push_char('A');
+        //[A, ^*Y, Z]
+        verify(test, 3, "YZ", "A");
+
+        let res = test.try_push_all("BC");
+        //[A, ^*Y, Z]
+        assert_eq!(res, Err(StringBufferError::BufferFull));
+        verify(test, 3, "YZ", "A");
     }
 }
