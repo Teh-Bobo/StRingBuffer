@@ -1085,6 +1085,18 @@ mod tests {
     fn try_push_some(test: &mut impl StringBuffer) {
         verify_empty(test);
 
+        //four bytes (too big for buffer)
+        let res = test.try_push_some("🦀"); //Crab Emoji (Fat Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
+        //[^_*, _, _]
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForStr));
+        verify_empty(test);
+
+        let res = test.try_push_some("ƛƛ"); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        //[^0xC6, 0x9B, _*]
+        assert_eq!(res, Ok(2));
+        verify(test, 2, "ƛ", "");
+
+        test.clear();
         let res = test.try_push_some("ABCD");
         //[^A, B, C]*
         assert_eq!(res, Ok(3));
@@ -1108,6 +1120,17 @@ mod tests {
     #[test_case(& mut StRingBuffer::< 3 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(3))]
     fn try_str_all(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        //four bytes (too big for buffer)
+        let res = test.try_push_all("🦀"); //Crab Emoji (Fat Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
+        //[^_*, _, _]
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForStr));
+        verify_empty(test);
+
+        let res = test.try_push_all("ƛƛ"); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        //[^0xC6, 0x9B, _*]
+        assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForStr));
         verify_empty(test);
 
         let res = test.try_push_all("ABCD");
