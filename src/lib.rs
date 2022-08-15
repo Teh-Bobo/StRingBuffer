@@ -143,7 +143,8 @@ pub trait StringBuffer {
         }
 
         if s.len() <= self.capacity() - self.len() {
-            Ok(self.push_str(s))
+            self.push_str(s);
+            Ok(())
         } else {
             Err(StringBufferError::NotEnoughSpaceForStr)
         }
