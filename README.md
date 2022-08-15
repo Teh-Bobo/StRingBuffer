@@ -54,8 +54,9 @@ would like to perform the alignment using O(n) time, where 'n' is the length of 
 ## Features
 Optional support for [Serde](https://docs.rs/serde/latest/serde/index.html) is included. 
 
-## No Std
-This library is nostd compatible by default.
+### No Std
+This library is nostd compatible by default. A ```std``` feature exists to add 
+[std::error::Error](https://doc.rust-lang.org/std/error/trait.Error.html) to the ```StringBufferError``` type.
 
 ## License
 
