@@ -119,22 +119,7 @@ pub trait StringBuffer {
     /// // the first bytes are pushed so long as there's room
     /// assert_eq!(buffer.as_slices().0,"ABCDE");
     /// ```
-    fn try_push_some(&mut self, s: &str) -> Result<usize, StringBufferError> {
-        if self.remaining_size() == 0 {
-            return Err(StringBufferError::BufferFull);
-        }
-
-        let mut sum = 0;
-        let mut iter = s.chars().map(|c| self.try_push_char(c));
-        while let Some(Ok(amount)) = iter.next() {
-            sum += amount;
-        }
-        if sum == 0 {
-            Err(StringBufferError::NotEnoughSpaceForStr)
-        } else {
-            Ok(sum)
-        }
-    }
+    fn try_push_some(&mut self, s: &str) -> Result<usize, StringBufferError>;
 
     /// Try to push the entire string into the buffer. If the string is too long or the buffer is
     /// full then nothing is written and Err(NotEnoughSpaceForStr) or Err(BufferFull) is returned
@@ -326,6 +311,26 @@ macro_rules! impl_buffer_trait {
             unsafe {
                 //SAFETY: s is a valid utf-8 byte sequence because it's a &str
                 self.state.insert_bytes(&mut self.data, s.as_bytes());
+            }
+        }
+
+        fn try_push_some(&mut self, s: &str) -> Result<usize, StringBufferError> {
+            if self.remaining_size() == 0 {
+                return Err(StringBufferError::BufferFull)
+            }
+            let bytes = s.as_bytes();
+            let char_boundary = prev_char_boundary(bytes, self.remaining_size()).unwrap_or(0);
+            let b = &bytes[..char_boundary];
+
+            // SAFETY: we know b is valid utf-8 because it came from a &str and we made sure to
+            // split it on a char boundary. Self.data must also be valid utf-8.
+            let len = unsafe {
+                self.state.insert_bytes(&mut self.data, b)
+            };
+            if len == 0 {
+                Err(StringBufferError::NotEnoughSpaceForStr)
+            } else {
+                Ok(len)
             }
         }
 
