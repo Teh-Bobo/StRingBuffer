@@ -56,7 +56,8 @@ pub trait StringBuffer {
     ///
     /// This will never panic nor fail. However, if the length of the char in utf-8 exceeds the
     /// length of the buffer then the buffer will be emptied.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_char('F');
@@ -68,12 +69,32 @@ pub trait StringBuffer {
     /// Tries to push the given character into the buffer. Will return Ok(c.bytes_len) if the write
     /// succeeded. If there is not enough room for the char or the buffer is full then
     /// Err(NotEnoughSpaceForChar) or Err(BufferFull) is returned respectively.
+    ///
+    /// # Example
+    /// ```rust
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer, StringBufferError};
+    ///
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// let res = buffer.try_push_char('🦀'); //Crab Emoji (Fat Ferris) (UTF-8: 0xF0 0x9F 0xA6 0x80)
+    /// assert_eq!(res, Ok(4));
+    ///
+    /// let res = buffer.try_push_char('🦀');
+    /// //already 4 bytes in the buffer, can't fit 4 more
+    /// assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForChar));
+    ///
+    /// //but 1 more does fit
+    /// assert_eq!(buffer.try_push_char('A'), Ok(1));
+    ///
+    /// //now the buffer is full and can't fit anything
+    /// assert_eq!(buffer.try_push_char('A'), Err(StringBufferError::BufferFull));
+    /// ```
     fn try_push_char(&mut self, c: char) -> Result<usize, StringBufferError>;
 
     /// Adds a &str to the buffer. Overwrites the start if the buffer is full.
     ///
     /// This will never panic nor fail.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_str("ABCDE");
@@ -87,6 +108,17 @@ pub trait StringBuffer {
 
     /// Will push as many chars as will fit into the existing space of the buffer. Will not
     /// overwrite any existing data.
+    ///
+    /// # Example
+    /// ```rust
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    ///
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// let res = buffer.try_push_some("ABCDEFGHIJKLMNO"); // too long
+    /// assert_eq!(res, Ok(5)); //only 5 bytes pushed
+    /// // the first bytes are pushed so long as there's room
+    /// assert_eq!(buffer.as_slices().0,"ABCDE");
+    /// ```
     fn try_push_some(&mut self, s: &str) -> Result<usize, StringBufferError> {
         if self.remaining_size() == 0 {
             return Err(StringBufferError::BufferFull);
@@ -107,6 +139,19 @@ pub trait StringBuffer {
     /// Try to push the entire string into the buffer. If the string is too long or the buffer is
     /// full then nothing is written and Err(NotEnoughSpaceForStr) or Err(BufferFull) is returned
     /// respectively.
+    ///
+    /// # Example
+    /// ```rust
+    /// use st_ring_buffer::{StRingBuffer, StringBuffer, StringBufferError};
+    ///
+    /// let mut buffer = StRingBuffer::<5>::new();
+    /// assert_eq!(buffer.try_push_all("ABCDE"), Ok(()));
+    /// assert_eq!(buffer.try_push_all("Z"), Err(StringBufferError::BufferFull));
+    ///
+    /// buffer.clear();
+    /// let res = buffer.try_push_all("ABCDEFGHIJKLMNO"); // too long
+    /// assert_eq!(res, Err(StringBufferError::NotEnoughSpaceForStr));
+    /// ```
     fn try_push_all(&mut self, s: &str) -> Result<(), StringBufferError> {
         if self.remaining_size() == 0 {
             return Err(StringBufferError::BufferFull);
@@ -123,7 +168,8 @@ pub trait StringBuffer {
     ///
     /// If the current data fits entirely in the buffer, and it is aligned, then the second
     /// reference will be an empty &str.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_str("ABCDE");
@@ -140,7 +186,8 @@ pub trait StringBuffer {
     /// buffer the size of the smaller &str given by [`as_slices`](StringBuffer::as_slices).
     ///
     /// This is required to represent the entire buffer as a single &str.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_str("ABCDE");
@@ -157,7 +204,8 @@ pub trait StringBuffer {
     /// in O([`buffer.len()`](StringBuffer::len)) time.
     ///
     /// This is required to represent the entire buffer as a single &str.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_str("ABCDE");
@@ -170,7 +218,8 @@ pub trait StringBuffer {
     fn align_no_alloc(&mut self);
 
     /// Returns the length of this buffer, in bytes, not chars or graphemes
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// buffer.push_str("ABCDEF");
@@ -182,7 +231,8 @@ pub trait StringBuffer {
     fn is_empty(&self) -> bool;
 
     /// The number of bytes this buffer can hold. Not the number of chars or graphemes.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
     /// let mut buffer = StRingBuffer::<5>::new();
     /// assert_eq!(buffer.capacity(), 5);
@@ -196,13 +246,19 @@ pub trait StringBuffer {
 
     /// Returns an iterator over the characters in the buffer. This includes both slices, in order,
     /// if the buffer is currently split.
-    /// ```
+    /// # Example
+    /// ```rust
     /// use st_ring_buffer::{StRingBuffer, StringBuffer};
+    ///
     /// let mut buffer = StRingBuffer::<5>::new();
+    /// //Fill up the buffer
     /// buffer.push_str("ABCDE");
+    /// //add one more so that the buffer is looped
     /// buffer.push_char('F');
     /// assert_eq!(buffer.as_slices().0, "BCDE");
     /// assert_eq!(buffer.as_slices().1, "F");
+    ///
+    /// //iterator doesn't care about loop and still gives all chars in order
     /// let mut iter = buffer.chars();
     /// assert_eq!(Some('B'), iter.next());
     /// assert_eq!(Some('C'), iter.next());
