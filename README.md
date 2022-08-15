@@ -4,10 +4,10 @@ StRing Buffer is a fixed sized UTF-8 String. It uses a ring buffer that overwrit
 the front when the buffer is full.
 
 ---
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/Teh-Bobo/StRingBuffer/Rust)
-![docs.rs](https://img.shields.io/docsrs/st_ring_buffer)
+[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/Teh-Bobo/StRingBuffer/Rust)](https://github.com/Teh-Bobo/StRingBuffer/actions)
+[![docs.rs](https://img.shields.io/docsrs/st_ring_buffer)](https://docs.rs/st_ring_buffer/0.2.0/st_ring_buffer/)
 ![Crates.io](https://img.shields.io/crates/l/st_ring_buffer)
-![Crates.io](https://img.shields.io/crates/v/st_ring_buffer)
+[![Crates.io](https://img.shields.io/crates/v/st_ring_buffer)](https://crates.io/crates/st_ring_buffer)
 
 ## Usage
 
@@ -17,7 +17,7 @@ on the heap using a variable size ```HeapStRingBuffer::new(SIZE)```.
 Both types of buffer implement the ```StringBuffer``` trait. The trait has a ```.push_str()``` and ```.push_char()``` method to add data to the buffer.
 
 To read data is a bit more complicated. The ```.as_slices()``` method returns two ```&str```. If the 
-buffer reaches the end of its alloted size and loops back then the first ```&str``` will contain the string
+buffer reaches the end of its allotted size and loops back then the first ```&str``` will contain the string
 data from the start to the end of the buffer and the second string will contain the rest of the data.
 
 If you want all the data in one ```&str``` then call ```.align()``` on the buffer first. This will ensure that all the
