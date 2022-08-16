@@ -20,6 +20,7 @@ use core::cmp::Ordering;
 use core::fmt::Formatter;
 use core::iter::Chain;
 use core::str::{Chars, from_utf8_unchecked};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +66,9 @@ pub trait StringBuffer {
     /// assert_eq!(buffer.as_slices().1, "");
     /// ```
     fn push_char(&mut self, c: char);
+
+    /// Remove a char from the buffer if one exists. Returns None if the buffer is empty.
+    fn pop(&mut self) -> Option<char>;
 
     /// Tries to push the given character into the buffer. Will return Ok(c.bytes_len) if the write
     /// succeeded. If there is not enough room for the char or the buffer is full then
@@ -342,6 +346,7 @@ macro_rules! impl_buffer_trait {
                 match self.state {
                     State::Empty => ("", ""),
                     State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
+                    State::OffsetStraight {offset, count} => (from_utf8_unchecked(&self.data[offset..(offset + count)]),"")
                     State::Looped { first, end_offset, next } => {
                         (from_utf8_unchecked(&self.data[first..(self.capacity() - end_offset as usize)]),
                          from_utf8_unchecked(&self.data[0..next]))
@@ -396,7 +401,7 @@ macro_rules! impl_buffer_trait {
         fn len(&self) -> usize {
             match self.state {
                 State::Empty => 0,
-                State::Straight { count } => count,
+                State::OffsetStraight{count} | State::Straight { count } => count,
                 State::Looped { first, end_offset, next } => {
                     if next > first {
                         self.capacity() - end_offset as usize
@@ -430,6 +435,51 @@ macro_rules! impl_buffer_trait {
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
+
+    fn pop(&mut self) -> Option<char> {
+        match &mut self.state {
+            State::Empty => None,
+            State::Straight { count } => {
+                //SAFETY: We know there is at least one char in the buffer since we're in the
+                // straight state. The only way for prev_char_boundary to fail is if self.data is
+                // malformed, which is undefined behavior.
+                let new_count = unsafe { prev_char_boundary(&self.data, *count - 1).unwrap_unchecked() };
+                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                //boundary, ensuring that char iterator will return exactly one char
+                let c = unsafe { from_utf8_unchecked(&self.data[new_count..*count]).chars().next().unwrap_unchecked() };
+                if new_count == 0 {
+                    self.state = State::Empty;
+                } else {
+                    *count = new_count
+                }
+                Some(c)
+            }
+            State::Looped { first, end_offset, next } => {
+                let prev_offset = if *next > self.data.len() {
+                    *end_offset as usize
+                } else {
+                    0
+                } + 1;
+                //SAFETY: We know there is at least one char in the buffer since we're in the
+                // looped state. The only way for prev_char_boundary to fail is if self.data is
+                // malformed, which is undefined behavior.
+                let new_next = unsafe { prev_char_boundary(&self.data, *next - prev_offset).unwrap_unchecked() };
+                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                //boundary, ensuring that char iterator will return exactly one char
+                let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
+
+                if new_next == 0 {
+                    *next = self.data.len()
+                } else if new_next == *first {
+                    self.state = State::Empty;
+                } else {
+                    *next = new_next
+                }
+
+                Some(c)
+            },
+        }
+    }
 }
 
 impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
@@ -461,6 +511,10 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 
 impl StringBuffer for HeapStRingBuffer {
     impl_buffer_trait!();
+
+    fn pop(&mut self) -> Option<char> {
+        todo!()
+    }
 }
 
 impl core::fmt::Display for HeapStRingBuffer {
@@ -536,6 +590,7 @@ enum State {
     #[default]
     Empty,
     Straight{count: usize},
+    OffsetStraight{offset: usize, count: usize},
     Looped{first: usize, end_offset: u8, next: usize}
 }
 
@@ -734,6 +789,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use alloc::string::ToString;
+
     use test_case::test_case;
 
     use crate::{next_char_boundary, prev_char_boundary, StRingBuffer, StringBuffer, StringBufferError};
@@ -1218,5 +1274,37 @@ mod tests {
         //[A, ^*Y, Z]
         assert_eq!(res, Err(StringBufferError::BufferFull));
         verify(test, 3, "YZ", "A");
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_char(test: &mut impl StringBuffer) {
+        //Empty
+        assert_eq!(test.pop(), None);
+
+        //Straight
+        test.push_char('A');
+        assert_eq!(test.pop(), Some('A'));
+
+        test.push_str("ƛƛ"); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        assert_eq!(test.pop(), Some('ƛ'));
+        verify(test, 2, "ƛ", "");
+        assert_eq!(test.pop(), Some('ƛ'));
+        verify_empty(test);
+        assert_eq!(test.pop(), None);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('E');
+        //[E, ^*B, C, D]
+        assert_eq!(test.pop(), Some('E'));
+        //[_, ^B, C, D]*
+        verify(test, 3, "BCD", "");
+
+        test.push_char('ƛ');
+        //[0xC6, 0x9B, ^*C, D]
+        verify(test, 4, "CD", "ƛ");
+        assert_eq!(test.pop(), Some('ƛ'));
+        verify(test, 2, "CD", "");
     }
 }
