@@ -346,7 +346,7 @@ macro_rules! impl_buffer_trait {
                 match self.state {
                     State::Empty => ("", ""),
                     State::Straight { count } => (from_utf8_unchecked(&self.data[0..count]),""),
-                    State::OffsetStraight {offset, count} => (from_utf8_unchecked(&self.data[offset..(offset + count)]),"")
+                    State::OffsetStraight {offset, next} => (from_utf8_unchecked(&self.data[offset..next]),""),
                     State::Looped { first, end_offset, next } => {
                         (from_utf8_unchecked(&self.data[first..(self.capacity() - end_offset as usize)]),
                          from_utf8_unchecked(&self.data[0..next]))
@@ -358,6 +358,10 @@ macro_rules! impl_buffer_trait {
         fn align(&mut self) {
             match self.state {
                 State::Empty | State::Straight { .. } => {}
+                State::OffsetStraight { offset, next } => {
+                    self.data.copy_within(offset..next, 0);
+                    self.state = State::Straight { count: next - offset }
+                }
                 State::Looped { first, end_offset, next } => {
                     let count = self.len();
                     let capacity_minus_offset = self.capacity() - end_offset as usize;
@@ -381,6 +385,10 @@ macro_rules! impl_buffer_trait {
         fn align_no_alloc(&mut self) {
             match self.state {
                 State::Empty | State::Straight { .. } => {}
+                State::OffsetStraight { offset, next } => {
+                    self.data.copy_within(offset..next, 0);
+                    self.state = State::Straight { count: next - offset }
+                }
                 State::Looped { first, end_offset, next } => {
                     let len = if next == first {
                         let len = self.data.len() - end_offset as usize;
@@ -401,7 +409,8 @@ macro_rules! impl_buffer_trait {
         fn len(&self) -> usize {
             match self.state {
                 State::Empty => 0,
-                State::OffsetStraight{count} | State::Straight { count } => count,
+                State::OffsetStraight{offset, next} => next - offset,
+                State::Straight { count } => count,
                 State::Looped { first, end_offset, next } => {
                     if next > first {
                         self.capacity() - end_offset as usize
@@ -422,7 +431,7 @@ macro_rules! impl_buffer_trait {
 
         fn remaining_size(&self) -> usize {
             match self.state {
-                State::Empty | State::Straight { .. } => self.capacity() - self.len(),
+                State::Empty | State::Straight { .. } | State::OffsetStraight { .. } => self.capacity() - self.len(),
                 State::Looped { end_offset, .. } => self.capacity() - self.len() - end_offset as usize,
             }
         }
@@ -439,6 +448,25 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     fn pop(&mut self) -> Option<char> {
         match &mut self.state {
             State::Empty => None,
+            State::OffsetStraight { offset, next } => {
+                //SAFETY: We know there is at least one char in the buffer since we're in the
+                // straight state. The only way for prev_char_boundary to fail is if self.data is
+                // malformed, which is undefined behavior.
+                let new_next = unsafe {
+                    prev_char_boundary(&self.data, *next - 1)
+                        .unwrap_unchecked()
+                        .max(*offset)
+                };
+                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                //boundary, ensuring that char iterator will return exactly one char
+                let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
+                if new_next == *offset {
+                    self.state = State::Empty;
+                } else {
+                    *next = new_next
+                }
+                Some(c)
+            }
             State::Straight { count } => {
                 //SAFETY: We know there is at least one char in the buffer since we're in the
                 // straight state. The only way for prev_char_boundary to fail is if self.data is
@@ -469,7 +497,7 @@ impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
                 let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
 
                 if new_next == 0 {
-                    *next = self.data.len()
+                    self.state = State::OffsetStraight { offset: *first, next: self.data.len() }
                 } else if new_next == *first {
                     self.state = State::Empty;
                 } else {
@@ -590,7 +618,7 @@ enum State {
     #[default]
     Empty,
     Straight{count: usize},
-    OffsetStraight{offset: usize, count: usize},
+    OffsetStraight{offset: usize, next: usize},
     Looped{first: usize, end_offset: u8, next: usize}
 }
 
@@ -603,6 +631,41 @@ impl State {
             State::Empty => {
                 *self = State::Straight { count: char_len };
                 data
+            }
+            State::OffsetStraight { offset, next } => {
+                if *next + char_len > data.len() {
+                    //char doesn't fit in straight, need to convert to looped
+                    let end_offset = (data.len() - *next).try_into().unwrap();
+                    if char_len <= *offset {
+                        //char fits before the offset
+                        *self = State::Looped {
+                            first: *offset,
+                            end_offset,
+                            next: char_len,
+                        };
+                        data
+                    } else {
+                        //offset needs to move
+                        *self = match next_char_boundary(&data, char_len) {
+                            //nothing found, this should only happen if the buffer
+                            //is small and adding this char overlaps the end and causes
+                            //the char to be written from the start--clearing the existing buffer
+                            None => State::Straight { count: char_len },
+                            //new first found within straight
+                            Some(first) =>
+                                State::Looped {
+                                    first,
+                                    end_offset,
+                                    next: char_len,
+                                },
+                        };
+                        data
+                    }
+                } else {
+                    //char fits as-is
+                    *next += char_len;
+                    &mut data[(*next - char_len)..*next]
+                }
             }
             State::Straight { count } => {
                 if *count + char_len > data.len() {
@@ -749,6 +812,56 @@ impl State {
                         },
                     };
 
+                }
+                bytes_len
+            }
+            State::OffsetStraight { offset, next } => {
+                let bytes_len = bytes.len();
+                if *next + bytes_len <= data.len() {
+                    //everything fits
+                    data[*next..(*next + bytes_len)].copy_from_slice(bytes);
+                    *next += bytes_len;
+                } else {
+                    // doesn't fit
+                    // start by finding where to split bytes. The first half will be inserted after
+                    // next, while the second half will loop back to the start
+                    let first_len = data.len() - *next;
+                    let index = prev_char_boundary(bytes, first_len)
+                        .expect("Tried to insert bytes with malformed utf-8");
+                    let (first, second) = bytes.split_at(index);
+                    let end_offset = (first_len - first.len()).try_into().unwrap();
+
+                    //copy first and calculate the end_offset
+                    data[*next..(*next + first.len())].copy_from_slice(first);
+                    data[..second.len()].copy_from_slice(second);
+                    if second.len() > *offset {
+                        // offset needs to move
+                        // find where the head should be
+                        let search_range = if first.is_empty() {
+                            // we didn't insert anything after count and we looped around so everything
+                            // after count is "empty"
+                            &data[..*next]
+                        } else {
+                            // if first was not empty then first may need to be the first char that
+                            // was inserted from bytes
+                            &data[..=*next]
+                        };
+                        match next_char_boundary(search_range, second.len()) {
+                            None => *next = second.len(),
+                            Some(new_first) => *self = State::Looped {
+                                first: new_first,
+                                end_offset,
+                                next: second.len(),
+                            },
+                        };
+                    } else {
+                        // offset stays, need to change to looped
+                        *self = State::Looped {
+                            first: *offset,
+                            end_offset,
+                            next: second.len()
+                        };
+                    }
                 }
                 bytes_len
             }
