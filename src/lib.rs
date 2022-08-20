@@ -728,7 +728,7 @@ impl State {
             State::Looped { first, end_offset, next } => {
                 if *first - *next < char_len {
                     //first needs to move
-                    match next_char_boundary(data, *first + char_len) {
+                    match next_char_boundary(data, *next + char_len) {
                         None => {
                             //first needs to loop back to the start (back to straight)
                             *self = State::Straight {count: *next};
@@ -1421,6 +1421,21 @@ mod tests {
         //[A, ^*Y, Z]
         assert_eq!(res, Err(StringBufferError::BufferFull));
         verify(test, 3, "YZ", "A");
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn big_char_small_gap(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        test.push_str("ƛCD"); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        test.push_char('E');
+        //[E, *_, ^C, D]
+        verify(test, 3, "CD", "E");
+
+        test.push_char('ƛ');
+        //[E, 0xC6, 0x9B, ^*D]
+        verify(test, 4, "D", "Eƛ");
     }
 
     #[test_case(& mut StRingBuffer::< 4 >::new())]
