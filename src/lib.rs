@@ -67,8 +67,11 @@ pub trait StringBuffer {
     /// ```
     fn push_char(&mut self, c: char);
 
-    /// Remove a char from the buffer if one exists. Returns None if the buffer is empty.
+    /// Remove a char from the buffer if one exists. Returns ```None``` if the buffer is empty.
     fn pop(&mut self) -> Option<char>;
+
+    /// Remove a char from the front of the buffer if one exists. Returns ```None``` if the buffer is empty.
+    fn pop_front(&mut self) -> Option<char>;
 
     /// Tries to push the given character into the buffer. Will return Ok(c.bytes_len) if the write
     /// succeeded. If there is not enough room for the char or the buffer is full then
@@ -357,6 +360,47 @@ macro_rules! impl_buffer_trait {
                         self.state = State::Empty;
                     } else {
                         *next = new_next
+                    }
+
+                    Some(c)
+                },
+            }
+        }
+
+        fn pop_front(&mut self) -> Option<char> {
+            match &mut self.state {
+                State::Empty => None,
+                State::OffsetStraight { offset, next } => {
+                    //SAFETY: we know that data is always valid utf-8 and have limited the range to only
+                    //include valid data
+                    let c = unsafe { from_utf8_unchecked(&self.data[*offset..*next]).chars().next().unwrap_unchecked() };
+                    if *offset + c.len_utf8() >= *next {
+                        self.state = State::Empty;
+                    } else {
+                        *offset += c.len_utf8();
+                    };
+                    Some(c)
+                }
+                State::Straight { count } => {
+                    //SAFETY: we know that data is always valid utf-8 and have limited the range to only
+                    //include valid data
+                    let c = unsafe { from_utf8_unchecked(&self.data[..*count]).chars().next().unwrap_unchecked() };
+                    self.state = if c.len_utf8() >= *count {
+                        State::Empty
+                    } else {
+                        State::OffsetStraight { offset: c.len_utf8(), next: *count }
+                    };
+                    Some(c)
+                }
+                State::Looped { first, end_offset, next } => {
+                    //SAFETY: we know that data is always valid utf-8 and have limited the range to only
+                    //include valid data
+                    let c = unsafe { from_utf8_unchecked(&self.data[*first..self.data.len() - *end_offset as usize]).chars().next().unwrap_unchecked() };
+
+                    if *first + c.len_utf8() >= self.data.len() - *end_offset as usize {
+                        self.state = State::Straight { count: *next }
+                    } else {
+                        *first += c.len_utf8();
                     }
 
                     Some(c)
@@ -1468,5 +1512,37 @@ mod tests {
         verify(test, 4, "CD", "ƛ");
         assert_eq!(test.pop(), Some('ƛ'));
         verify(test, 2, "CD", "");
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_front(test: &mut impl StringBuffer) {
+        //Empty
+        assert_eq!(test.pop(), None);
+
+        //Straight
+        test.push_char('A');
+        assert_eq!(test.pop_front(), Some('A'));
+
+        test.push_str("ƛƛ"); //Latin Small Letter Lambda with Stroke (UTF-8: 0xC6 0x9B)
+        assert_eq!(test.pop_front(), Some('ƛ'));
+        verify(test, 2, "ƛ", "");
+        assert_eq!(test.pop_front(), Some('ƛ'));
+        verify_empty(test);
+        assert_eq!(test.pop_front(), None);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('E');
+        //[E, ^*B, C, D]
+        assert_eq!(test.pop_front(), Some('B'));
+        //[E, *_, ^C, D]
+        verify(test, 3, "CD", "E");
+
+        test.push_char('ƛ');
+        //[E, 0xC6, 0x9B, ^*D]
+        verify(test, 4, "D", "Eƛ");
+        assert_eq!(test.pop_front(), Some('D'));
+        verify(test, 3, "Eƛ", "");
     }
 }
