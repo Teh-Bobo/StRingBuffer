@@ -734,7 +734,7 @@ impl State {
                         data
                     } else {
                         //offset needs to move
-                        *self = match next_char_boundary(&data, char_len) {
+                        *self = match next_char_boundary(data, char_len) {
                             //nothing found, this should only happen if the buffer
                             //is small and adding this char overlaps the end and causes
                             //the char to be written from the start--clearing the existing buffer
