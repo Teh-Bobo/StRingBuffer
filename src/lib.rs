@@ -590,6 +590,44 @@ impl HeapStRingBuffer {
     }
 }
 
+impl<const SIZE: usize> IntoIterator for StRingBuffer<SIZE> {
+    type Item = char;
+    type IntoIter = BufferIterator<StRingBuffer<SIZE>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BufferIterator{
+            buffer: self
+        }
+    }
+}
+
+impl IntoIterator for HeapStRingBuffer {
+    type Item = char;
+    type IntoIter = BufferIterator<HeapStRingBuffer>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BufferIterator{
+            buffer: self
+        }
+    }
+}
+
+/// An iterator for StringBuffer types.
+pub struct BufferIterator<T>
+    where T: StringBuffer {
+    buffer: T,
+}
+
+impl<T> Iterator for BufferIterator<T>
+    where T: StringBuffer {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buffer.pop()
+    }
+}
+
+//-------------------------
 const fn is_utf8_char_boundary(b: u8) -> bool {
     // Stolen from core::num::mod, which keeps this function private
     // This is bit magic equivalent to: b < 128 || b >= 192
