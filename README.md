@@ -48,8 +48,10 @@ fn main() {
 
 ## Time Complexity
 Pushing data into the buffer is always constant time. Aligning the buffer is also done in constant
-time using, at most, two memcopys. The ```StringBuffer``` trait also provides ```align_no_alloc``` if you
-would like to perform the alignment using O(n) time, where 'n' is the length of the shortest leg of the buffer.
+time using, at most, two memcopys; however, it does allocate a temporary buffer that is the same size as the shortest
+&str returned by ```as_slices()```. The ```StringBuffer``` trait also provides ```align_no_alloc``` if you
+would like to perform the alignment without allocating a temporary buffer, but using O(n) time, where 'n' is the length 
+of the shortest leg of the buffer.
 
 ## Features
 Optional support for [Serde](https://docs.rs/serde/latest/serde/index.html) is included. 
