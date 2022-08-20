@@ -18,7 +18,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt::Formatter;
-use core::iter::Chain;
+use core::iter::{Chain, FusedIterator};
 use core::str::{Chars, from_utf8_unchecked};
 
 #[cfg(feature = "serde")]
@@ -653,6 +653,7 @@ impl IntoIterator for HeapStRingBuffer {
 }
 
 /// An iterator for StringBuffer types.
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct BufferIterator<T>
     where T: StringBuffer {
     buffer: T,
@@ -666,6 +667,15 @@ impl<T> Iterator for BufferIterator<T>
         self.buffer.pop()
     }
 }
+
+impl<T> DoubleEndedIterator for BufferIterator<T>
+    where T: StringBuffer {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.buffer.pop_front()
+    }
+}
+
+impl<T> FusedIterator for BufferIterator<T> where T: StringBuffer {}
 
 //-------------------------
 const fn is_utf8_char_boundary(b: u8) -> bool {
