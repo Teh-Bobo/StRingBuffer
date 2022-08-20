@@ -300,6 +300,70 @@ macro_rules! impl_buffer_trait {
             c.encode_utf8(slice);
         }
 
+        fn pop(&mut self) -> Option<char> {
+            match &mut self.state {
+                State::Empty => None,
+                State::OffsetStraight { offset, next } => {
+                    //SAFETY: We know there is at least one char in the buffer since we're in the
+                    // straight state. The only way for prev_char_boundary to fail is if self.data is
+                    // malformed, which is undefined behavior.
+                    let new_next = unsafe {
+                        prev_char_boundary(&self.data, *next - 1)
+                            .unwrap_unchecked()
+                            .max(*offset)
+                    };
+                    //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                    //boundary, ensuring that char iterator will return exactly one char
+                    let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
+                    if new_next == *offset {
+                        self.state = State::Empty;
+                    } else {
+                        *next = new_next
+                    }
+                    Some(c)
+                }
+                State::Straight { count } => {
+                    //SAFETY: We know there is at least one char in the buffer since we're in the
+                    // straight state. The only way for prev_char_boundary to fail is if self.data is
+                    // malformed, which is undefined behavior.
+                    let new_count = unsafe { prev_char_boundary(&self.data, *count - 1).unwrap_unchecked() };
+                    //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                    //boundary, ensuring that char iterator will return exactly one char
+                    let c = unsafe { from_utf8_unchecked(&self.data[new_count..*count]).chars().next().unwrap_unchecked() };
+                    if new_count == 0 {
+                        self.state = State::Empty;
+                    } else {
+                        *count = new_count
+                    }
+                    Some(c)
+                }
+                State::Looped { first, end_offset, next } => {
+                    let prev_offset = if *next > self.data.len() {
+                        *end_offset as usize
+                    } else {
+                        0
+                    } + 1;
+                    //SAFETY: We know there is at least one char in the buffer since we're in the
+                    // looped state. The only way for prev_char_boundary to fail is if self.data is
+                    // malformed, which is undefined behavior.
+                    let new_next = unsafe { prev_char_boundary(&self.data, *next - prev_offset).unwrap_unchecked() };
+                    //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
+                    //boundary, ensuring that char iterator will return exactly one char
+                    let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
+
+                    if new_next == 0 {
+                        self.state = State::OffsetStraight { offset: *first, next: self.data.len() }
+                    } else if new_next == *first {
+                        self.state = State::Empty;
+                    } else {
+                        *next = new_next
+                    }
+
+                    Some(c)
+                },
+            }
+        }
+
         fn try_push_char(&mut self, c: char) -> Result<usize, StringBufferError> {
             let remaining_size = self.remaining_size();
             if remaining_size == 0 {
@@ -444,70 +508,6 @@ macro_rules! impl_buffer_trait {
 
 impl<const SIZE: usize> StringBuffer for StRingBuffer<SIZE> {
     impl_buffer_trait!();
-
-    fn pop(&mut self) -> Option<char> {
-        match &mut self.state {
-            State::Empty => None,
-            State::OffsetStraight { offset, next } => {
-                //SAFETY: We know there is at least one char in the buffer since we're in the
-                // straight state. The only way for prev_char_boundary to fail is if self.data is
-                // malformed, which is undefined behavior.
-                let new_next = unsafe {
-                    prev_char_boundary(&self.data, *next - 1)
-                        .unwrap_unchecked()
-                        .max(*offset)
-                };
-                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
-                //boundary, ensuring that char iterator will return exactly one char
-                let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
-                if new_next == *offset {
-                    self.state = State::Empty;
-                } else {
-                    *next = new_next
-                }
-                Some(c)
-            }
-            State::Straight { count } => {
-                //SAFETY: We know there is at least one char in the buffer since we're in the
-                // straight state. The only way for prev_char_boundary to fail is if self.data is
-                // malformed, which is undefined behavior.
-                let new_count = unsafe { prev_char_boundary(&self.data, *count - 1).unwrap_unchecked() };
-                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
-                //boundary, ensuring that char iterator will return exactly one char
-                let c = unsafe { from_utf8_unchecked(&self.data[new_count..*count]).chars().next().unwrap_unchecked() };
-                if new_count == 0 {
-                    self.state = State::Empty;
-                } else {
-                    *count = new_count
-                }
-                Some(c)
-            }
-            State::Looped { first, end_offset, next } => {
-                let prev_offset = if *next > self.data.len() {
-                    *end_offset as usize
-                } else {
-                    0
-                } + 1;
-                //SAFETY: We know there is at least one char in the buffer since we're in the
-                // looped state. The only way for prev_char_boundary to fail is if self.data is
-                // malformed, which is undefined behavior.
-                let new_next = unsafe { prev_char_boundary(&self.data, *next - prev_offset).unwrap_unchecked() };
-                //SAFETY: we know that data is always valid utf-8 and have sliced it along a char
-                //boundary, ensuring that char iterator will return exactly one char
-                let c = unsafe { from_utf8_unchecked(&self.data[new_next..*next]).chars().next().unwrap_unchecked() };
-
-                if new_next == 0 {
-                    self.state = State::OffsetStraight { offset: *first, next: self.data.len() }
-                } else if new_next == *first {
-                    self.state = State::Empty;
-                } else {
-                    *next = new_next
-                }
-
-                Some(c)
-            },
-        }
-    }
 }
 
 impl<const SIZE: usize> core::fmt::Display for StRingBuffer<SIZE> {
@@ -539,10 +539,6 @@ impl<const SIZE: usize> StRingBuffer<SIZE> {
 
 impl StringBuffer for HeapStRingBuffer {
     impl_buffer_trait!();
-
-    fn pop(&mut self) -> Option<char> {
-        todo!()
-    }
 }
 
 impl core::fmt::Display for HeapStRingBuffer {
