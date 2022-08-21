@@ -666,6 +666,16 @@ impl<T> Iterator for BufferIterator<T>
     fn next(&mut self) -> Option<Self::Item> {
         self.buffer.pop()
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.buffer.len()))
+    }
+
+    fn last(mut self) -> Option<Self::Item> where Self: Sized {
+        let ret = self.buffer.pop_front();
+        self.buffer.clear();
+        ret
+    }
 }
 
 impl<T> DoubleEndedIterator for BufferIterator<T>
