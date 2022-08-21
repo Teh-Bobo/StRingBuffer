@@ -1536,6 +1536,30 @@ mod tests {
 
     #[test_case(& mut StRingBuffer::< 4 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_to_empty(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        //Straight
+        test.push_str("ABCD");
+        assert_eq!(test.pop(), Some('D'));
+        assert_eq!(test.pop(), Some('C'));
+        assert_eq!(test.pop(), Some('B'));
+        assert_eq!(test.pop(), Some('A'));
+        assert_eq!(test.pop(), None);
+        verify_empty(test);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('ƛ');
+        assert_eq!(test.pop(), Some('ƛ'));
+        assert_eq!(test.pop(), Some('D'));
+        assert_eq!(test.pop(), Some('C'));
+        assert_eq!(test.pop(), None);
+        verify_empty(test);
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
     fn pop_front(test: &mut impl StringBuffer) {
         //Empty
         assert_eq!(test.pop(), None);
@@ -1564,5 +1588,29 @@ mod tests {
         verify(test, 4, "D", "Eƛ");
         assert_eq!(test.pop_front(), Some('D'));
         verify(test, 3, "Eƛ", "");
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_front_to_empty(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        //Straight
+        test.push_str("ABCD");
+        assert_eq!(test.pop_front(), Some('A'));
+        assert_eq!(test.pop_front(), Some('B'));
+        assert_eq!(test.pop_front(), Some('C'));
+        assert_eq!(test.pop_front(), Some('D'));
+        assert_eq!(test.pop_front(), None);
+        verify_empty(test);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('ƛ');
+        assert_eq!(test.pop_front(), Some('C'));
+        assert_eq!(test.pop_front(), Some('D'));
+        assert_eq!(test.pop_front(), Some('ƛ'));
+        assert_eq!(test.pop_front(), None);
+        verify_empty(test);
     }
 }
