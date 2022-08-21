@@ -31,7 +31,9 @@ fn main() {
   // On the heap
   let mut heap = HeapStRingBuffer::new(5);
   heap.push_str("ABCDE");
+  //as_slices() returns (&str, &str). If the buffer does not loop around the capacity then the second &str is empty.  
   assert_eq!(heap.as_slices().0, "ABCDE");
+  //"FG" loops around to the front of the buffer, overwriting "AB"
   heap.push_str("FG");
   let (first, second) = heap.as_slices();
   assert_eq!(first, "CDE");
@@ -40,7 +42,9 @@ fn main() {
   // On the stack
   let mut stack = StRingBuffer::<5>::new();
   stack.push_str("ABCDE");
+  //'F' overwrites 'A', making the buffer loop around the capacity
   stack.push_char('F');
+  //align the buffer so everything fits in one &str
   stack.align();
   assert_eq!(stack.as_slices().0, "BCDEF");
 }

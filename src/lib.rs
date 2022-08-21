@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
-use core::fmt::Formatter;
+use core::fmt::{Formatter, Write};
 use core::iter::{Chain, FusedIterator};
 use core::str::{Chars, from_utf8_unchecked};
 
@@ -570,6 +570,18 @@ impl<const SIZE: usize> From<[u8; SIZE]> for StRingBuffer<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Write for StRingBuffer<SIZE> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.push_str(s);
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.push_char(c);
+        Ok(())
+    }
+}
+
 impl<const SIZE: usize> StRingBuffer<SIZE> {
 
     /// Creates a new StRingBuffer on the stack using the const generic size.
@@ -652,6 +664,18 @@ impl IntoIterator for HeapStRingBuffer {
     }
 }
 
+impl Write for HeapStRingBuffer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.push_str(s);
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.push_char(c);
+        Ok(())
+    }
+}
+
 /// An iterator for StringBuffer types.
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct BufferIterator<T>
@@ -665,6 +689,16 @@ impl<T> Iterator for BufferIterator<T>
 
     fn next(&mut self) -> Option<Self::Item> {
         self.buffer.pop()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.buffer.len()))
+    }
+
+    fn last(mut self) -> Option<Self::Item> where Self: Sized {
+        let ret = self.buffer.pop_front();
+        self.buffer.clear();
+        ret
     }
 }
 
@@ -1526,6 +1560,30 @@ mod tests {
 
     #[test_case(& mut StRingBuffer::< 4 >::new())]
     #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_to_empty(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        //Straight
+        test.push_str("ABCD");
+        assert_eq!(test.pop(), Some('D'));
+        assert_eq!(test.pop(), Some('C'));
+        assert_eq!(test.pop(), Some('B'));
+        assert_eq!(test.pop(), Some('A'));
+        assert_eq!(test.pop(), None);
+        verify_empty(test);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('ƛ');
+        assert_eq!(test.pop(), Some('ƛ'));
+        assert_eq!(test.pop(), Some('D'));
+        assert_eq!(test.pop(), Some('C'));
+        assert_eq!(test.pop(), None);
+        verify_empty(test);
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
     fn pop_front(test: &mut impl StringBuffer) {
         //Empty
         assert_eq!(test.pop(), None);
@@ -1554,5 +1612,29 @@ mod tests {
         verify(test, 4, "D", "Eƛ");
         assert_eq!(test.pop_front(), Some('D'));
         verify(test, 3, "Eƛ", "");
+    }
+
+    #[test_case(& mut StRingBuffer::< 4 >::new())]
+    #[test_case(& mut HeapStRingBuffer::new(4))]
+    fn pop_front_to_empty(test: &mut impl StringBuffer) {
+        verify_empty(test);
+
+        //Straight
+        test.push_str("ABCD");
+        assert_eq!(test.pop_front(), Some('A'));
+        assert_eq!(test.pop_front(), Some('B'));
+        assert_eq!(test.pop_front(), Some('C'));
+        assert_eq!(test.pop_front(), Some('D'));
+        assert_eq!(test.pop_front(), None);
+        verify_empty(test);
+
+        //Looped
+        test.push_str("ABCD");
+        test.push_char('ƛ');
+        assert_eq!(test.pop_front(), Some('C'));
+        assert_eq!(test.pop_front(), Some('D'));
+        assert_eq!(test.pop_front(), Some('ƛ'));
+        assert_eq!(test.pop_front(), None);
+        verify_empty(test);
     }
 }
