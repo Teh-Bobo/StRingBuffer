@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
-use core::fmt::Formatter;
+use core::fmt::{Formatter, Write};
 use core::iter::{Chain, FusedIterator};
 use core::str::{Chars, from_utf8_unchecked};
 
@@ -570,6 +570,18 @@ impl<const SIZE: usize> From<[u8; SIZE]> for StRingBuffer<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Write for StRingBuffer<SIZE> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.push_str(s);
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.push_char(c);
+        Ok(())
+    }
+}
+
 impl<const SIZE: usize> StRingBuffer<SIZE> {
 
     /// Creates a new StRingBuffer on the stack using the const generic size.
@@ -649,6 +661,18 @@ impl IntoIterator for HeapStRingBuffer {
         BufferIterator{
             buffer: self
         }
+    }
+}
+
+impl Write for HeapStRingBuffer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.push_str(s);
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        self.push_char(c);
+        Ok(())
     }
 }
 
